@@ -67,6 +67,7 @@ function sourceLabel(id: string, config: UsageLimitSourceConfig): string {
  */
 const USAGE_LIMIT_REFRESH_INTERVAL = Duration.minutes(5);
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const api = yield* makeCliproxyApi;
   const settingsService = yield* ServerSettingsService;

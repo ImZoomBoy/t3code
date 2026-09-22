@@ -47,6 +47,7 @@ function makeReadModel(): OrchestrationReadModel {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        pullRequests: [],
         latestTurn: null,
         createdAt: THREAD_UPDATED_AT,
         updatedAt: THREAD_UPDATED_AT,

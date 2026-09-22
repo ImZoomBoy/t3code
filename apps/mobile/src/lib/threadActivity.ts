@@ -1,8 +1,11 @@
+import * as Option from "effect/Option";
+import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
+import * as Schema from "effect/Schema";
 import {
   requestKindFromRequestType,
   type PendingApproval,
 } from "@t3tools/client-runtime/pending-requests";
-import { isToolLifecycleItemType } from "@t3tools/contracts";
+import { UserInputAttachmentAnswerPayload, isToolLifecycleItemType } from "@t3tools/contracts";
 import type {
   OrchestrationLatestTurn,
   OrchestrationThread,
@@ -41,6 +44,8 @@ export type { PendingApproval, PendingUserInput } from "@t3tools/client-runtime/
 export interface PendingUserInputDraftAnswer {
   readonly selectedOptionValues?: ReadonlyArray<string>;
   readonly customAnswer?: string;
+  readonly attachmentCount?: number;
+  readonly attachmentsBlocked?: boolean;
 }
 
 export interface ThreadFeedActivity {
@@ -76,6 +81,7 @@ export interface ThreadFeedActivity {
 }
 
 export interface WorkLogEntry {
+  readonly questionAnswer?: UserInputAttachmentAnswerPayload;
   id: string;
   createdAt: string;
   turnId: TurnId | null;
@@ -162,7 +168,7 @@ export type ThreadFeedEntry =
       readonly summaryKind: ToolGroupSummaryKind;
       readonly toolSurface?: WorkLogEntry["toolSurface"];
       readonly toolIcon?: WorkLogEntry["toolIcon"];
-      readonly summaryToolIcon?: "browser" | "t3-code";
+      readonly summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request";
       readonly hasFailure: boolean;
       readonly live: boolean;
       readonly shimmer: boolean;
@@ -258,6 +264,10 @@ export function isContextCompactionActivityGroup(
   );
 }
 
+function isUserInputActivityGroup(entry: ThreadFeedActivityGroup): boolean {
+  return entry.activities.some((activity) => activity.workEntry.questionAnswer !== undefined);
+}
+
 function normalizeDraftAnswer(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -302,6 +312,7 @@ function resolvePendingUserInputAnswer(
   question: UserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
 ): string | ReadonlyArray<string> | null {
+  if (draft?.attachmentsBlocked) return null;
   const customAnswer =
     question.allowCustomAnswer === false ? null : normalizeDraftAnswer(draft?.customAnswer);
   if (customAnswer) {
@@ -310,9 +321,16 @@ function resolvePendingUserInputAnswer(
 
   const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   if (question.multiSelect) {
-    return selectedOptionValues.length > 0 ? selectedOptionValues : null;
+    return selectedOptionValues.length > 0
+      ? selectedOptionValues
+      : question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0
+        ? ""
+        : null;
   }
-  return selectedOptionValues[0] ?? null;
+  return (
+    selectedOptionValues[0] ??
+    (question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0 ? "" : null)
+  );
 }
 
 /** Some providers settle agents through task.updated instead of task.completed. */
@@ -392,7 +410,8 @@ function deriveWorkLogEntries(
 ): DerivedWorkLogEntry[] {
   const ordered = Arr.sort(activities, activityOrder);
   const entries: DerivedWorkLogEntry[] = [];
-  for (const activity of ordered) {
+  for (const activity of foldUserInputActivities(ordered)) {
+    // Mobile has no setup card, so a failed setup surfaces as an error row.
     if (activity.tone !== "error" && isWorktreeSetupActivity(activity.kind)) continue;
     if (activity.kind === "tool.started") continue;
     // Like web: an agent's task.started row anchors its batch. It has a fixed
@@ -434,6 +453,8 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
       : null;
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
+
+const decodeQuestionAttachmentAnswer = Schema.decodeUnknownOption(UserInputAttachmentAnswerPayload);
 
 function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
   const payload =
@@ -480,6 +501,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           ? "info"
           : activity.tone,
     sourceActivityKind: activity.kind,
+    ...(() => {
+      if (activity.kind !== "user-input.answer-submitted") return {};
+      const answer = decodeQuestionAttachmentAnswer(activity.payload);
+      return Option.isSome(answer) ? { questionAnswer: answer.value } : {};
+    })(),
   };
   const toolCallId =
     asTrimmedString(payload?.toolCallId) ?? asTrimmedString(asRecord(payload?.data)?.toolCallId);
@@ -916,6 +942,7 @@ function workEntryStatus(entry: WorkLogEntry): ThreadFeedActivity["status"] {
 function workEntryIcon(entry: DerivedWorkLogEntry): ThreadFeedActivity["icon"] {
   if (entry.agentSpawn) return "agent";
   if (
+    entry.questionAnswer ||
     entry.sourceActivityKind === "user-input.requested" ||
     entry.sourceActivityKind === "user-input.resolved"
   ) {
@@ -969,6 +996,7 @@ function buildWorkEntryExpandedBody(entry: WorkLogEntry): string | null {
  * for every row (see the deferred-expansion test).
  */
 function workEntryCanExpand(entry: WorkLogEntry): boolean {
+  if (entry.questionAnswer) return true;
   if (entry.agentSpawn) return agentSpawnMembers(entry.agentSpawn).length > 0;
   if (entry.itemType === "mcp_tool_call" && entry.toolData !== undefined) return true;
   if (entry.changedFiles?.some((path) => path.trim().length > 0)) return true;
@@ -1491,16 +1519,6 @@ const activityOrder = Order.combineAll<OrchestrationThreadActivity>([
   Order.mapInput(Order.String, (activity) => activity.id),
 ]);
 
-/**
- * Total order for the merged transcript: creation time, then the id. The web
- * client sorts its timeline the same way, so a row holds the same position on
- * both surfaces.
- */
-const rawThreadFeedEntryOrder = Order.combine<RawThreadFeedEntry>(
-  Order.mapInput(Order.String, (entry) => entry.createdAt),
-  Order.mapInput(Order.String, (entry) => entry.id),
-);
-
 function isEmptyMessage(entry: RawThreadFeedEntry): boolean {
   if (entry.type !== "message") {
     return false;
@@ -1550,13 +1568,15 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
       continue;
     }
 
-    const isCompaction = entry.activity.workEntry.sourceActivityKind === "context-compaction";
-    if (isCompaction || firstActivityEntry?.turnId !== entry.turnId) {
+    const isStandalone =
+      entry.activity.workEntry.sourceActivityKind === "context-compaction" ||
+      entry.activity.workEntry.questionAnswer !== undefined;
+    if (isStandalone || firstActivityEntry?.turnId !== entry.turnId) {
       flushGroup();
     }
     firstActivityEntry ??= entry;
     openGroupActivities.push(entry.activity);
-    if (isCompaction) {
+    if (isStandalone) {
       flushGroup();
     }
   }
@@ -1662,7 +1682,9 @@ function deriveThreadFeedTurnFolds(
       entries
         .filter(
           (entry) =>
-            entry.id !== firstAssistantMessageId && entry.id !== terminalAssistantMessageId,
+            entry.id !== firstAssistantMessageId &&
+            entry.id !== terminalAssistantMessageId &&
+            !(entry.type === "activity-group" && isUserInputActivityGroup(entry)),
         )
         .map((entry) => entry.id),
     );
@@ -1842,7 +1864,7 @@ function appendPresentedFeedEntry(
     result.push(entry);
     return;
   }
-  if (isContextCompactionActivityGroup(entry)) {
+  if (isContextCompactionActivityGroup(entry) || isUserInputActivityGroup(entry)) {
     result.push(entry);
     return;
   }
@@ -2183,30 +2205,34 @@ export function buildThreadFeed(
   // not assumed to arrive oldest-first, so the bound is the smallest creation
   // time in it rather than the first row's.
   const oldestLoadedMessageCreatedAt =
-    options?.loadedMessages === undefined
-      ? null
-      : loadedMessages.reduce<string | null>(
-          (oldest, message) =>
-            oldest === null || message.createdAt < oldest ? message.createdAt : oldest,
-          null,
-        );
-  const activityEntries = getThreadFeedActivityEntries(thread.activities);
-  const entries = Arr.sort(
+    options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null;
+  const activityEntries = getThreadFeedActivityEntries(thread.activities).filter(
+    (entry) =>
+      oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
+  );
+  const foldedAnswerMessageIds = new Set(
+    activityEntries.flatMap((entry) =>
+      entry.activity.workEntry.questionAnswer
+        ? [`async-answer:${entry.activity.workEntry.questionAnswer.requestId}`]
+        : [],
+    ),
+  );
+  const entries = Arr.sortWith(
     [
-      ...messages.map((message) => {
-        let entry = messageEntriesCache.get(message);
-        if (!entry) {
-          entry = { type: "message", id: message.id, createdAt: message.createdAt, message };
-          messageEntriesCache.set(message, entry);
-        }
-        return entry;
-      }),
-      ...activityEntries.filter(
-        (entry) =>
-          oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
-      ),
+      ...messages
+        .filter((message) => message.role !== "user" || !foldedAnswerMessageIds.has(message.id))
+        .map((message) => {
+          let entry = messageEntriesCache.get(message);
+          if (!entry) {
+            entry = { type: "message", id: message.id, createdAt: message.createdAt, message };
+            messageEntriesCache.set(message, entry);
+          }
+          return entry;
+        }),
+      ...activityEntries,
     ],
-    rawThreadFeedEntryOrder,
+    (s) => new Date(s.createdAt),
+    Order.Date,
   );
 
   return groupAdjacentActivities(entries);

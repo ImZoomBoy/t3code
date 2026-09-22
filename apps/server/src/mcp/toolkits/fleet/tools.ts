@@ -1,7 +1,7 @@
 import {
   EnvironmentId,
   IsoDateTime,
-  PreviewAutomationUnavailableError,
+  McpCapabilityUnavailableError,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -50,7 +50,7 @@ export const FleetWhoamiTool = Tool.make("fleet_whoami", {
     "Report the calling thread's own identity, taken from the server-issued credential this call arrived on. Takes no arguments: a thread can only ever ask about itself.",
   parameters: Tool.EmptyParams,
   success: FleetThreadIdentity,
-  failure: PreviewAutomationUnavailableError,
+  failure: McpCapabilityUnavailableError,
   dependencies: [McpInvocationContext.McpInvocationContext],
 })
   .annotate(Tool.Title, "Get calling thread identity")
@@ -64,7 +64,7 @@ export const FleetListThreadsTool = Tool.make("fleet_list_threads", {
     "List every thread in this environment, archived ones included, so recovery work can find a thread that is no longer in normal navigation. Each entry says whether it is archived or live.",
   parameters: Tool.EmptyParams,
   success: FleetThreadList,
-  failure: PreviewAutomationUnavailableError,
+  failure: McpCapabilityUnavailableError,
   dependencies: [
     McpInvocationContext.McpInvocationContext,
     ProjectionSnapshotQuery.ProjectionSnapshotQuery,

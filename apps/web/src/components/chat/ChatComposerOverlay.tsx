@@ -11,6 +11,8 @@ export interface ChatComposerOverlayProps {
   readonly hidden: boolean;
   /** The centred hero position a draft with no messages uses. */
   readonly hero: boolean;
+  /** Upstream disables the whole bar while a checkpoint revert is running. */
+  readonly inert?: boolean;
   readonly ref?: Ref<HTMLDivElement>;
   readonly children: ReactNode;
 }
@@ -32,6 +34,7 @@ export function ChatComposerOverlay(props: ChatComposerOverlayProps) {
   return (
     <div
       ref={props.ref}
+      inert={props.inert}
       data-chat-composer-overlay="true"
       className={
         props.hero

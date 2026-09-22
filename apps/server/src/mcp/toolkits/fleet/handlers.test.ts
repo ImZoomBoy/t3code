@@ -2,9 +2,9 @@ import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   type IsoDateTime,
+  McpCapabilityUnavailableError,
   type OrchestrationShellSnapshot,
   type OrchestrationThreadShell,
-  PreviewAutomationUnavailableError,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -39,6 +39,7 @@ const makeThreadShell = (
   interactionMode: "default",
   branch: null,
   worktreePath: null,
+  pullRequests: [],
   latestTurn: null,
   createdAt: "2026-01-01T00:00:00.000Z" as IsoDateTime,
   updatedAt: "2026-01-02T00:00:00.000Z" as IsoDateTime,
@@ -88,6 +89,8 @@ const makeProjectionLayer = (
     getThreadDetailById: () => Effect.die("unused"),
     getThreadDetailSnapshot: () => Effect.die("unused"),
     getThreadLifecycleById: () => Effect.die("unused"),
+    listActivitiesByKind: () => Effect.die("unused"),
+    getProjectShells: () => Effect.die("unused"),
   });
 
 it.effect("reports the calling thread's identity from the invocation scope", () => {
@@ -110,7 +113,7 @@ it.effect("refuses the identity verb with the existing capability error", () => 
       Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
       Effect.flip,
     );
-    expect(error).toBeInstanceOf(PreviewAutomationUnavailableError);
+    expect(error).toBeInstanceOf(McpCapabilityUnavailableError);
     expect(error).toMatchObject({
       capability: "fleet",
       environmentId: scope.environmentId,
@@ -161,7 +164,7 @@ it.effect("refuses listing with the existing capability error", () => {
       Effect.provide(makeProjectionLayer([], [])),
       Effect.flip,
     );
-    expect(error).toBeInstanceOf(PreviewAutomationUnavailableError);
+    expect(error).toBeInstanceOf(McpCapabilityUnavailableError);
     expect(error).toMatchObject({ capability: "fleet" });
   });
 });

@@ -4,7 +4,11 @@ import {
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
-import type { ServerProviderSkill, ServerProviderSlashCommand } from "@t3tools/contracts";
+import type {
+  PullRequestContextMetadata,
+  ServerProviderSkill,
+  ServerProviderSlashCommand,
+} from "@t3tools/contracts";
 import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
 import { memo } from "react";
 import { Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
@@ -14,6 +18,13 @@ import { AppText as Text } from "../../components/AppText";
 import { GlassSurface } from "../../components/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 export type ComposerCommandItem =
+  | {
+      readonly id: string;
+      readonly type: "pull-request";
+      readonly pullRequest: PullRequestContextMetadata;
+      readonly label: string;
+      readonly description: string;
+    }
   | {
       readonly id: string;
       readonly type: "path";
@@ -48,6 +59,7 @@ interface ComposerCommandPopoverProps {
   readonly items: ReadonlyArray<ComposerCommandItem>;
   readonly triggerKind: ComposerTriggerKind | null;
   readonly isLoading: boolean;
+  readonly error?: string | null;
   readonly onSelect: (item: ComposerCommandItem) => void;
 }
 
@@ -80,6 +92,8 @@ const SKILL_SOURCE_SYMBOL_BY_KIND: Record<ProviderSkillSourceKind, AppSymbolName
 
 function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
   switch (item.type) {
+    case "pull-request":
+      return { ios: "arrow.triangle.pull", android: "merge" };
     case "slash-command":
     case "provider-slash-command":
       return "terminal";
@@ -92,6 +106,8 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
 
 function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   switch (triggerKind) {
+    case "pull-request":
+      return "Pull requests";
     case "slash-command":
       return "Commands";
     case "skill":
@@ -108,6 +124,8 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
     return triggerKind === "path" ? "Searching files…" : "Loading…";
   }
   switch (triggerKind) {
+    case "pull-request":
+      return "No matching pull requests.";
     case "path":
       return "No matching files or folders.";
     case "skill":
@@ -210,7 +228,7 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
       ) : (
         <View className="px-3.5 py-2.5">
           <Text className="text-xs text-foreground-tertiary">
-            {emptyText(props.triggerKind, props.isLoading)}
+            {props.error ?? emptyText(props.triggerKind, props.isLoading)}
           </Text>
         </View>
       )}

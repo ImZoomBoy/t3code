@@ -29,6 +29,7 @@ function makeReadModel(threadUpdatedAt = THREAD_UPDATED_AT): OrchestrationReadMo
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        pullRequests: [],
         latestTurn: null,
         createdAt: threadUpdatedAt,
         updatedAt: threadUpdatedAt,
