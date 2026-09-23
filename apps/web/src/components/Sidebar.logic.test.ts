@@ -28,6 +28,7 @@ import {
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreads,
+  partitionFirstMateThreads,
   formatWorkingDurationLabel,
   shouldClearThreadSelectionOnMouseDown,
   shouldRecedeSidebarThread,
@@ -2576,4 +2577,53 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("partitionFirstMateThreads", () => {
+  const thread = (
+    id: string,
+    fleet: {
+      readonly fleetRole?: "first-mate" | "second-mate" | "worker";
+      readonly fleetRepo?: string | null;
+      readonly archivedAt?: string | null;
+    } = {},
+  ) => ({ id, archivedAt: null, ...fleet });
+
+  it("puts the live First Mate in its own slot, outside every section", () => {
+    const firstMate = thread("fm", { fleetRole: "first-mate", fleetRepo: null });
+    const secondMate = thread("2m", { fleetRole: "second-mate", fleetRepo: "t3code" });
+    const worker = thread("w", { fleetRole: "worker", fleetRepo: "t3code" });
+    const plain = thread("plain");
+    const { slot, rest } = partitionFirstMateThreads([secondMate, firstMate, worker, plain]);
+    expect(slot).toEqual([firstMate]);
+    // Second mates and workers stay with ordinary threads, under their project.
+    expect(rest).toEqual([secondMate, worker, plain]);
+  });
+
+  it("leaves the slot empty once First Mate is archived", () => {
+    const archived = thread("fm", { fleetRole: "first-mate", archivedAt: "2026-09-23T00:00:00Z" });
+    const { slot, rest } = partitionFirstMateThreads([archived, thread("plain")]);
+    expect(slot).toEqual([]);
+    expect(rest.map((entry) => entry.id)).toEqual(["plain"]);
+  });
+});
+
+describe("searchSidebarThreads for fleet threads", () => {
+  it("finds First Mate by its shown title and older fleet threads by their work", () => {
+    const threads = [
+      {
+        environmentId: localEnvironmentId,
+        id: ThreadId.make("fm"),
+        title: "fm/claude-code-hooks opus-5 high",
+        fleetRole: "first-mate" as const,
+      },
+      {
+        environmentId: localEnvironmentId,
+        id: ThreadId.make("crewmate"),
+        title: "[crewmate] feat/wake-on-task-filed opus-5-5[1m] medium",
+      },
+    ];
+    expect(searchSidebarThreads(threads, "first mate")).toEqual([threads[0]]);
+    expect(searchSidebarThreads(threads, "wake-on-task")).toEqual([threads[1]]);
+  });
 });

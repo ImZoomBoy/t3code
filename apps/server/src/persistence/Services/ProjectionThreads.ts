@@ -8,6 +8,7 @@
  */
 import {
   CommandId,
+  FleetRole,
   IsoDateTime,
   ModelSelection,
   NonNegativeInt,
@@ -59,6 +60,9 @@ export const ProjectionThread = Schema.Struct({
   // SQLite has no boolean type, so this is 0 or 1 like the counters above.
   readOnly: NonNegativeInt,
   fleetOwned: NonNegativeInt,
+  // Optional so rows built before the fleet roles existed still encode.
+  fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
+  fleetRepo: Schema.optional(Schema.NullOr(Schema.String)),
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;

@@ -84,6 +84,19 @@ If dragging is unavailable for one environment, update the T3 Code server runnin
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
+## First Mate threads
+
+On web and desktop, the First Mate thread sits in its own slot at the top of the sidebar,
+outside every project, with a pink ship's wheel. It stays pinned there and never settles
+automatically, even when a pull request linked to it merges. Second mate and worker threads
+sit with their project and carry a **Second mate** or **Worker** label.
+
+When no First Mate thread is live, for example after you archive it, choose **New First Mate**
+at the top of the sidebar to start one. It runs in the folder set in **Settings → General →
+First Mate working directory**. The first time, the desktop app asks you to choose that folder
+and saves it. A new First Mate runs on Claude Opus 5.5 with the 1M context at medium effort.
+Only one First Mate thread can be live at a time.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

@@ -9,6 +9,7 @@ import {
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
+import { threadDisplayTitle } from "@t3tools/client-runtime/fleet-threads";
 import {
   questionAttachmentDraftId,
   questionAttachmentDraftPrefix,
@@ -9840,7 +9841,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
             {...(routeKind === "draft" && draftId ? { draftId } : {})}
-            activeThreadTitle={activeThread.title}
+            activeThreadTitle={threadDisplayTitle(activeThread)}
             isServerThread={isServerThread}
             activeProject={activeProject}
             openInCwd={gitCwd}

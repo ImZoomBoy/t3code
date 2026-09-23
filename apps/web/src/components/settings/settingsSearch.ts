@@ -303,6 +303,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification toast popup completion input approval failure"],
   },
   {
+    id: "first-mate-working-directory",
+    title: "First Mate working directory",
+    to: "/settings/general",
+    searchTerms: ["fleet orchestrator folder path instructions new first mate thread"],
+  },
+  {
     id: "time-format",
     title: "Time format",
     to: "/settings/general",

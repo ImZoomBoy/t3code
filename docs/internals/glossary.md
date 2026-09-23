@@ -72,3 +72,4 @@ Terms this fork adds.
 | Term              | Meaning                                                                                                                                                                                                  |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Update pill label | The short version label the sidebar update pill shows while a downloaded update waits, for example `v0.0.41 ready`. `getForkUpdatePillLabel` owns the words. One label, never a modal and never a toast. |
+| Fleet role        | `fleetRole` on a thread (`first-mate`, `second-mate`, `worker`) and its `fleetRepo`. Set at creation. Clients label and place threads by it, never by title.                                             |

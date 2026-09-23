@@ -10,6 +10,7 @@ import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Effect from "effect/Effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { isFirstMateThread } from "./fleetThreads.ts";
 
 function invariantError(commandType: string, detail: string): OrchestrationCommandInvariantError {
   return new OrchestrationCommandInvariantError({
@@ -192,6 +193,35 @@ export function requireThreadPromptable(input: {
               `Thread '${input.threadId}' is read-only and cannot handle command '${input.command.type}'.`,
             ),
           ),
+    ),
+  );
+}
+
+/**
+ * At most one First Mate thread is live at a time: not archived, not deleted.
+ * The sidebar gives that thread its own slot, and a second one would have
+ * nowhere to go. A new one may start once the old one is archived, and the
+ * old one may come back only once the new one is archived in turn.
+ */
+export function requireNoOtherLiveFirstMateThread(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly threadId: ThreadId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const live = input.readModel.threads.find(
+    (thread) =>
+      isFirstMateThread(thread) &&
+      thread.id !== input.threadId &&
+      thread.archivedAt === null &&
+      thread.deletedAt === null,
+  );
+  if (live === undefined) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `First Mate thread '${live.id}' is already live. Archive it before starting another.`,
     ),
   );
 }

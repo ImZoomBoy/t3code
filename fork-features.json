@@ -143,6 +143,22 @@
       ],
       "test": "apps/web/src/components/chat/readOnlyThreadModel.test.tsx",
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-fleet-thread-roles",
+      "description": "Fleet threads carry a role. The First Mate thread gets its own sidebar slot and never auto-settles; second mates and workers are labelled under their project.",
+      "keep": "fleetThreads.ts, useStartFirstMateThread.ts and fork migration 8 are ours whole, and the fleetRole and fleetRepo fields, the First Mate sidebar slot, the settlement exception and the single First Mate invariant survive in the files listed; everything else in those files follows upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "packages/client-runtime/src/fleetThreads.ts",
+        "apps/server/src/orchestration/commandInvariants.ts",
+        "apps/server/src/orchestration/ThreadSettlementPolicy.ts",
+        "apps/server/src/persistence/ForkMigrations/008_ProjectionThreadsFleetRole.ts",
+        "apps/web/src/components/Sidebar.tsx",
+        "apps/web/src/hooks/useStartFirstMateThread.ts"
+      ],
+      "test": "apps/server/src/orchestration/decider.fleetRole.test.ts",
+      "patchesUpstream": true
     }
   ]
 }

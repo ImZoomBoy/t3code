@@ -62,6 +62,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           has_actionable_proposed_plan,
           read_only,
           fleet_owned,
+          fleet_role,
+          fleet_repo,
           deleted_at
         )
         VALUES (
@@ -96,6 +98,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.hasActionableProposedPlan},
           ${row.readOnly},
           ${row.fleetOwned},
+          ${row.fleetRole ?? null},
+          ${row.fleetRepo ?? null},
           ${row.deletedAt}
         )
         ON CONFLICT (thread_id)
@@ -130,6 +134,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           has_actionable_proposed_plan = excluded.has_actionable_proposed_plan,
           read_only = excluded.read_only,
           fleet_owned = excluded.fleet_owned,
+          fleet_role = excluded.fleet_role,
+          fleet_repo = excluded.fleet_repo,
           deleted_at = excluded.deleted_at
       `,
   });
@@ -171,6 +177,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
           read_only AS "readOnly",
           fleet_owned AS "fleetOwned",
+          fleet_role AS "fleetRole",
+          fleet_repo AS "fleetRepo",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}

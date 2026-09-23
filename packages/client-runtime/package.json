@@ -15,6 +15,10 @@
       "types": "./src/worktreeSetup.ts",
       "default": "./src/worktreeSetup.ts"
     },
+    "./fleet-threads": {
+      "types": "./src/fleetThreads.ts",
+      "default": "./src/fleetThreads.ts"
+    },
     "./load-balancing": {
       "types": "./src/load-balancing.ts",
       "default": "./src/load-balancing.ts"

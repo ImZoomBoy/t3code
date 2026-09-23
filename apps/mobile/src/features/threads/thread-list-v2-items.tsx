@@ -11,6 +11,7 @@ import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import type { ThreadMoveDestination } from "./threadOrder";
+import { threadDisplayTitle } from "@t3tools/client-runtime/fleet-threads";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -888,7 +889,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         )}
         numberOfLines={2}
       >
-        {thread.title}
+        {threadDisplayTitle(thread)}
       </Text>
       {props.searchMatch ? (
         <View className="mt-1">
@@ -1092,7 +1093,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               )}
               numberOfLines={1}
             >
-              {thread.title}
+              {threadDisplayTitle(thread)}
             </Text>
             {props.searchMatch ? (
               <ThreadSearchMatchExcerpt

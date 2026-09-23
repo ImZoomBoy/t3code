@@ -474,6 +474,64 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
+  it.effect("round-trips a fleet role and repository through the thread row", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const base = {
+        projectId: ProjectId.make("project-1"),
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-5-5",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-09-23T00:00:00.000Z",
+        updatedAt: "2026-09-23T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        readOnly: 0,
+        fleetOwned: 1,
+        deletedAt: null,
+      } as const;
+
+      yield* threads.upsert({
+        ...base,
+        threadId: ThreadId.make("thread-second-mate"),
+        title: "feat/fleet-thread-roles",
+        fleetRole: "second-mate",
+        fleetRepo: "t3code",
+      });
+      yield* threads.upsert({
+        ...base,
+        threadId: ThreadId.make("thread-plain"),
+        title: "An ordinary thread",
+      });
+
+      const secondMate = Option.getOrNull(
+        yield* threads.getById({ threadId: ThreadId.make("thread-second-mate") }),
+      );
+      assert.strictEqual(secondMate?.fleetRole, "second-mate");
+      assert.strictEqual(secondMate?.fleetRepo, "t3code");
+      const plain = Option.getOrNull(
+        yield* threads.getById({ threadId: ThreadId.make("thread-plain") }),
+      );
+      assert.strictEqual(plain?.fleetRole, null);
+      assert.strictEqual(plain?.fleetRepo, null);
+    }),
+  );
+
   it.effect("round-trips manual and branch pull requests through the thread row", () =>
     Effect.gen(function* () {
       const threads = yield* ProjectionThreadRepository;

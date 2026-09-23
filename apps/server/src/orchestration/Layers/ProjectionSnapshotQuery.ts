@@ -599,6 +599,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
           read_only AS "readOnly",
           fleet_owned AS "fleetOwned",
+          fleet_role AS "fleetRole",
+          fleet_repo AS "fleetRepo",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -642,6 +644,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
           read_only AS "readOnly",
           fleet_owned AS "fleetOwned",
+          fleet_role AS "fleetRole",
+          fleet_repo AS "fleetRepo",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -717,6 +721,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
           read_only AS "readOnly",
           fleet_owned AS "fleetOwned",
+          fleet_role AS "fleetRole",
+          fleet_repo AS "fleetRepo",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -1305,6 +1311,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
           read_only AS "readOnly",
           fleet_owned AS "fleetOwned",
+          fleet_role AS "fleetRole",
+          fleet_repo AS "fleetRepo",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -2403,6 +2411,8 @@ pending_approval_requests AS (
                   repositoryIdentities.get(row.projectId),
                 ),
                 branchPullRequest: row.branchPullRequest,
+                fleetRole: row.fleetRole ?? null,
+                fleetRepo: row.fleetRepo ?? null,
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2648,6 +2658,8 @@ pending_approval_requests AS (
                     repositoryIdentities.get(row.projectId),
                   ),
                   branchPullRequest: row.branchPullRequest,
+                  fleetRole: row.fleetRole ?? null,
+                  fleetRepo: row.fleetRepo ?? null,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2804,6 +2816,8 @@ pending_approval_requests AS (
                           row.projectId,
                           repositoryIdentities.get(row.projectId),
                         ),
+                        fleetRole: row.fleetRole ?? null,
+                        fleetRepo: row.fleetRepo ?? null,
                         latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                         createdAt: row.createdAt,
                         updatedAt: row.updatedAt,
@@ -2967,6 +2981,8 @@ pending_approval_requests AS (
                     row.projectId,
                     repositoryIdentities.get(row.projectId),
                   ),
+                  fleetRole: row.fleetRole ?? null,
+                  fleetRepo: row.fleetRepo ?? null,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -3343,6 +3359,8 @@ pending_approval_requests AS (
                 ?.repositoryIdentity,
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
+        fleetRole: threadRow.value.fleetRole ?? null,
+        fleetRepo: threadRow.value.fleetRepo ?? null,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3644,6 +3662,8 @@ pending_approval_requests AS (
                 ?.repositoryIdentity,
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
+        fleetRole: threadRow.value.fleetRole ?? null,
+        fleetRepo: threadRow.value.fleetRepo ?? null,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,

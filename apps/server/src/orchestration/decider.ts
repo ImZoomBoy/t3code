@@ -38,6 +38,7 @@ import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
+  requireNoOtherLiveFirstMateThread,
   requireProjectAbsent,
   requireThread,
   requireThreadArchived,
@@ -45,6 +46,7 @@ import {
   requireThreadNotArchived,
   requireThreadPromptable,
 } from "./commandInvariants.ts";
+import { isFirstMateThread, resolveFleetRepo } from "./fleetThreads.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
@@ -450,6 +452,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (isFirstMateThread(command)) {
+        yield* requireNoOtherLiveFirstMateThread({
+          readModel,
+          command,
+          threadId: command.threadId,
+        });
+      }
+      const fleetRepo = resolveFleetRepo(command);
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -475,6 +485,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           // later, because the session that created it is long gone by the
           // time a turn arrives.
           fleetOwned: command.issuer === "fleet" ? true : undefined,
+          ...(command.fleetRole != null ? { fleetRole: command.fleetRole } : {}),
+          ...(fleetRepo !== null ? { fleetRepo } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -538,11 +550,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.unarchive": {
-      yield* requireThreadArchived({
+      const archived = yield* requireThreadArchived({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (isFirstMateThread(archived)) {
+        yield* requireNoOtherLiveFirstMateThread({
+          readModel,
+          command,
+          threadId: command.threadId,
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -571,6 +590,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `thread ${command.threadId} changed before automatic settlement`,
+          }),
+        );
+      }
+      // The First Mate thread lives for as long as the captain keeps it, so
+      // nothing settles it on their behalf. See `isAutoSettlementCandidate`.
+      if (command.type === "thread.auto-settle" && isFirstMateThread(thread)) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `thread ${command.threadId} is the First Mate thread and never settles automatically`,
           }),
         );
       }
