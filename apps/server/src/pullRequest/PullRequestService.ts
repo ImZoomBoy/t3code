@@ -205,6 +205,10 @@ export class PullRequestService extends Context.Service<
       never,
       Scope.Scope
     >;
+    /**
+     * Each refresh after subscribing. The current revision is not replayed: a reader that
+     * subscribes is already reading fresh data, and a replay would restart its first read.
+     */
     readonly subscribeRefreshes: Stream.Stream<number>;
     readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
@@ -3243,9 +3247,7 @@ export const make = Effect.gen(function* () {
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
-    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes).pipe(
-      Stream.filter((revision) => revision > 0),
-    ),
+    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes).pipe(Stream.drop(1)),
     refreshAfterTurn,
     detail: credentialCached(detail),
     activity: credentialCached(activity),
