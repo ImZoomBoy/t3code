@@ -91,14 +91,13 @@ export interface AppModelOption {
   isUnavailable?: boolean;
 }
 
-function appendUnavailableDynamicModelSelection(
+function appendUnavailableModelSelection(
   options: AppModelOption[],
   rawModels: ReadonlyArray<ServerProvider["models"][number]>,
   provider: ProviderDriverKind,
   selectedModel: string | null | undefined,
   hiddenModels: ReadonlyArray<string>,
 ): AppModelOption[] {
-  if (provider !== "opencode" && provider !== "antigravity") return options;
   const slug = normalizeCustomModelSlug(selectedModel);
   if (!slug) return options;
   if (provider === "antigravity" && slug === ANTIGRAVITY_DEFAULT_MODEL) return options;
@@ -215,7 +214,12 @@ function getAppModelOptions(
   }
 
   const preferences = readInstanceModelPreferences(settings, defaultInstanceId);
-  return appendUnavailableDynamicModelSelection(
+  // This driver-level path is reached when the selected instance is gone, so
+  // only account-scoped catalogs keep a model the list does not report.
+  if (provider !== "opencode" && provider !== "antigravity") {
+    return applyInstanceModelPreferences(options, preferences);
+  }
+  return appendUnavailableModelSelection(
     applyInstanceModelPreferences(options, preferences),
     rawModels,
     provider,
@@ -263,7 +267,7 @@ export function getAppModelOptionsForInstance(
   }
 
   const preferences = readInstanceModelPreferences(settings, entry.instanceId);
-  return appendUnavailableDynamicModelSelection(
+  return appendUnavailableModelSelection(
     applyInstanceModelPreferences(options, preferences),
     entry.models,
     entry.driverKind,
@@ -306,10 +310,9 @@ export function resolveAppModelSelectionForInstance(
   if (resolvedSelection) {
     return resolvedSelection;
   }
-  if (
-    resolutionOptions?.preserveUnavailableSelection &&
-    (entry.driverKind === "opencode" || entry.driverKind === "antigravity")
-  ) {
+  // A saved selection is the model its turns run on, so an id the catalog
+  // does not list is kept rather than swapped for a different real model.
+  if (resolutionOptions?.preserveUnavailableSelection) {
     const unavailableSelection = normalizeCustomModelSlug(selectedModel);
     const hiddenModels = readInstanceModelPreferences(settings, entry.instanceId).hiddenModels;
     if (
@@ -322,6 +325,41 @@ export function resolveAppModelSelectionForInstance(
     }
   }
   return options.find((option) => option.isDefault)?.slug ?? options[0]?.slug ?? null;
+}
+
+const CLAUDE_CONTEXT_WINDOW_SUFFIX = /^(.+)\[([^\]]+)\]$/;
+
+/**
+ * Claude Code accepts a context window inline in the model id, as in
+ * `claude-opus-5-5[1m]`. Rewrite such a selection to the listed model plus its
+ * `contextWindow` option so the picker can find it. The server maps that pair
+ * back to the same id at spawn. Anything else is returned unchanged.
+ */
+export function splitClaudeContextWindowSuffix(
+  selection: ModelSelection | null | undefined,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection | null | undefined {
+  if (!selection) return selection;
+  const match = CLAUDE_CONTEXT_WINDOW_SUFFIX.exec(selection.model.trim());
+  if (!match) return selection;
+  const [, baseModel, contextWindow] = match;
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  if (provider?.driver !== "claudeAgent") return selection;
+  const descriptor = provider.models
+    .find((model) => !model.isCustom && model.slug === baseModel)
+    ?.capabilities?.optionDescriptors?.find((candidate) => candidate.id === "contextWindow");
+  if (
+    !baseModel ||
+    !contextWindow ||
+    descriptor?.type !== "select" ||
+    !descriptor.options.some((option) => option.id === contextWindow)
+  ) {
+    return selection;
+  }
+  return createModelSelection(selection.instanceId, baseModel, [
+    ...(selection.options ?? []).filter((option) => option.id !== "contextWindow"),
+    { id: "contextWindow", value: contextWindow },
+  ]);
 }
 
 /**
