@@ -347,6 +347,68 @@ it.effect("a detail read of a missing pull request still fails", () =>
   }),
 );
 
+it.effect("a detail read whose host call always ends interrupted stops after two retries", () =>
+  Effect.gen(function* () {
+    let reads = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () =>
+            Effect.suspend(() => {
+              reads++;
+              return Effect.interrupt;
+            }),
+        }),
+      ],
+    });
+    const ref = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const exit = yield* Effect.exit(service.detail(ref));
+    assert.isTrue(Exit.hasInterrupts(exit));
+    assert.strictEqual(reads, 3);
+  }),
+);
+
+it.effect("a list read sent while a cancelled list read is stopping still loads", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const stopping = yield* Deferred.make<void>();
+    let reads = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          listChangeRequests: () =>
+            Effect.suspend(() => {
+              reads++;
+              return reads === 1
+                ? Deferred.succeed(started, undefined).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.onInterrupt(() =>
+                      Deferred.succeed(stopping, undefined).pipe(
+                        Effect.andThen(Effect.sleep("1 second")),
+                      ),
+                    ),
+                  )
+                : Effect.succeed({
+                    items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+                    truncated: false,
+                    continues: true,
+                  });
+            }),
+        }),
+      ],
+    });
+    const first = yield* Effect.forkChild(service.list({ state: "open" }));
+    yield* Deferred.await(started);
+    yield* Effect.forkChild(Fiber.interrupt(first));
+    yield* Deferred.await(stopping);
+    const second = yield* Effect.forkChild(service.list({ state: "open" }));
+    yield* TestClock.adjust("1 second");
+    assert.strictEqual((yield* Fiber.join(second)).entries.length, 1);
+  }),
+);
+
 it.effect("keeps previews warm when another project finishes a turn", () =>
   Effect.gen(function* () {
     const reads: string[] = [];

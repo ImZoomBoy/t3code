@@ -618,6 +618,25 @@ const observeRead = Effect.fnUntraced(function* <A, E, R>(read: Effect.Effect<A,
   return { value: yield* read, observedAt };
 });
 
+/**
+ * Callers of the same read share one in-flight host call. A client that restarts a query
+ * cancels its read and sends it again at once, so the new read can join the call that the
+ * cancel is still stopping, and end interrupted though nobody cancelled it. Such a read asks
+ * again, which starts a fresh call, at most twice. A read that is cancelled itself stops as
+ * before: a cancelled fiber skips the retry.
+ */
+const retryIfJoinedCancelledCall = <A, E>(
+  read: Effect.Effect<A, E>,
+  retries = 2,
+): Effect.Effect<A, E> =>
+  read.pipe(
+    Effect.catchCause((cause) =>
+      retries > 0 && Cause.hasInterruptsOnly(cause)
+        ? retryIfJoinedCancelledCall(read, retries - 1)
+        : Effect.failCause(cause),
+    ),
+  );
+
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
   const pullRequestRefreshes = yield* SubscriptionRef.make(0);
@@ -3190,19 +3209,6 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  /**
-   * Callers of the same read share one in-flight host call. A client that restarts a query
-   * cancels its read and sends it again at once, so the new read can join the call that the
-   * cancel is still stopping, and end interrupted though nobody cancelled it. Such a read asks
-   * again, which starts a fresh call. A read that is cancelled itself stops as before.
-   */
-  const outlivingCancelledCalls = <A, E>(read: Effect.Effect<A, E>): Effect.Effect<A, E> =>
-    read.pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause) ? outlivingCancelledCalls(read) : Effect.failCause(cause),
-      ),
-    );
-
   const credentialCached =
     <I extends PullRequestRef, Args extends ReadonlyArray<unknown>, A, E>(
       read: (input: I, ...args: Args) => Effect.Effect<A, E>,
@@ -3211,7 +3217,7 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const ref = yield* canonicalRef(input);
         const credential = yield* routingCredential;
-        return yield* outlivingCancelledCalls(
+        return yield* retryIfJoinedCancelledCall(
           read(
             credential === null
               ? ref
@@ -3225,10 +3231,12 @@ export const make = Effect.gen(function* () {
     routing,
     routingIdentity,
     withRoutingCredential,
-    list,
+    list: (input) => retryIfJoinedCancelledCall(list(input)),
     listStats: (input) =>
       Effect.forEach(input.refs, (ref) => canonicalRef(ref).pipe(Effect.option)).pipe(
-        Effect.flatMap((refs) => listStats({ ...input, refs: refs.flatMap(Option.toArray) })),
+        Effect.flatMap((refs) =>
+          retryIfJoinedCancelledCall(listStats({ ...input, refs: refs.flatMap(Option.toArray) })),
+        ),
       ),
     summary: credentialCached(summary),
     stack: credentialCached(stack),
