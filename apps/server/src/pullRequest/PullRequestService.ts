@@ -5,6 +5,7 @@ import {
 } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -3189,6 +3190,19 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  /**
+   * Callers of the same read share one in-flight host call. A client that restarts a query
+   * cancels its read and sends it again at once, so the new read can join the call that the
+   * cancel is still stopping, and end interrupted though nobody cancelled it. Such a read asks
+   * again, which starts a fresh call. A read that is cancelled itself stops as before.
+   */
+  const outlivingCancelledCalls = <A, E>(read: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    read.pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause) ? outlivingCancelledCalls(read) : Effect.failCause(cause),
+      ),
+    );
+
   const credentialCached =
     <I extends PullRequestRef, Args extends ReadonlyArray<unknown>, A, E>(
       read: (input: I, ...args: Args) => Effect.Effect<A, E>,
@@ -3197,11 +3211,13 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const ref = yield* canonicalRef(input);
         const credential = yield* routingCredential;
-        return yield* read(
-          credential === null
-            ? ref
-            : { ...ref, [credentialNamespace]: credential.credentialFingerprint },
-          ...args,
+        return yield* outlivingCancelledCalls(
+          read(
+            credential === null
+              ? ref
+              : { ...ref, [credentialNamespace]: credential.credentialFingerprint },
+            ...args,
+          ),
         );
       });
 
