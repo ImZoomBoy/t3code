@@ -15,6 +15,11 @@ import {
   type ThreadSnoozeShell,
 } from "@t3tools/client-runtime/state/thread-settled";
 import {
+  isFirstMateThread,
+  threadDisplayTitle,
+  type FleetThreadFields,
+} from "@t3tools/client-runtime/fleet-threads";
+import {
   getThreadSortTimestamp,
   resolveSettledThreadTimestamp,
   sortThreads,
@@ -904,12 +909,32 @@ const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
  * by `threadSearchMatchKey`). Keeping the input order means lifecycle ordering
  * (active, snoozed, settled) remains stable while the user narrows the list.
  */
+/**
+ * Split the First Mate thread out of the sidebar's thread list. First Mate
+ * belongs to no project, so it sits in its own slot above every section and
+ * ignores the project scope: `slot` holds the live First Mate threads (the
+ * server keeps that to one per environment) and `rest` holds every other
+ * thread, for the pinned, active, snoozed, and settled sections to share.
+ */
+export function partitionFirstMateThreads<
+  T extends FleetThreadFields & { readonly archivedAt: string | null },
+>(threads: readonly T[]): { readonly slot: T[]; readonly rest: T[] } {
+  const slot: T[] = [];
+  const rest: T[] = [];
+  for (const thread of threads) {
+    if (!isFirstMateThread(thread)) rest.push(thread);
+    else if (thread.archivedAt === null) slot.push(thread);
+  }
+  return { slot, rest };
+}
+
 export function searchSidebarThreads<
   T extends {
     readonly environmentId: EnvironmentId;
     readonly id: ThreadId;
     readonly title: string;
-  } & Parameters<typeof threadPullRequestSearchTerms>[0],
+  } & FleetThreadFields &
+    Parameters<typeof threadPullRequestSearchTerms>[0],
 >(
   threads: readonly T[],
   query: string,
@@ -920,9 +945,12 @@ export function searchSidebarThreads<
   const titleMatches: T[] = [];
   const contentMatches: T[] = [];
   for (const thread of threads) {
-    const matchesTitle = [thread.title, ...threadPullRequestSearchTerms(thread)].some((term) =>
-      term.toLowerCase().includes(normalizedQuery),
-    );
+    // The shown title too, so "First Mate" finds the First Mate thread.
+    const matchesTitle = [
+      thread.title,
+      threadDisplayTitle(thread),
+      ...threadPullRequestSearchTerms(thread),
+    ].some((term) => term.toLowerCase().includes(normalizedQuery));
     if (matchesTitle) {
       titleMatches.push(thread);
     } else if (

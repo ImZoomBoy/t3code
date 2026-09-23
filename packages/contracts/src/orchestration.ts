@@ -704,6 +704,15 @@ export const ThreadTitleRegeneration = Schema.Struct({
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
 /**
+ * The part a fleet thread plays for First Mate. The First Mate thread is the
+ * orchestrator and belongs to no repository. A second mate runs one
+ * repository. A worker does one task in one repository. Clients label and
+ * place a thread by this, never by its title.
+ */
+export const FleetRole = Schema.Literals(["first-mate", "second-mate", "worker"]);
+export type FleetRole = typeof FleetRole.Type;
+
+/**
  * Legacy single-PR link. Still emitted as the thread's derived current pull
  * request (see `@t3tools/shared/threadPullRequests`) so clients from before
  * `pullRequests` keep working independently of their release schedule.
@@ -852,6 +861,12 @@ export const OrchestrationThread = Schema.Struct({
   // fleet-owned - an ACP worker mirror, say - stays refused to the fleet too.
   // Optional so old servers/clients interop; absent = false.
   fleetOwned: Schema.optional(Schema.Boolean),
+  // See `FleetRole`. Set once at creation and never cleared. Optional so old
+  // servers/clients interop; absent = an ordinary thread.
+  fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
+  // The repository a fleet thread works for, such as "t3code". Null for the
+  // First Mate thread, which works for no one repository.
+  fleetRepo: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -924,6 +939,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.readOnly. Carried on the shell too so a list row
   // can say so without loading the transcript.
   readOnly: Schema.optional(Schema.Boolean),
+  // See OrchestrationThread.fleetRole. On the shell because the sidebar
+  // labels and places a row by them.
+  fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
+  fleetRepo: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -1155,6 +1174,11 @@ const ThreadCreateCommandFields = {
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   historyImport: Schema.optional(Schema.Literal(true)),
+  // Labels, not permissions: they decide where a client shows the thread and
+  // what it calls it, so an ordinary client may set them too. The decider
+  // keeps at most one live First Mate thread.
+  fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
+  fleetRepo: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 } as const;
 
 const ThreadCreateCommand = Schema.Struct({
@@ -1871,6 +1895,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   // See `OrchestrationThread.fleetOwned`. Optional so events written before
   // the fleet existed still decode; absent = false.
   fleetOwned: Schema.optional(Schema.Boolean),
+  // See `OrchestrationThread.fleetRole`. Optional so older events decode.
+  fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
+  fleetRepo: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

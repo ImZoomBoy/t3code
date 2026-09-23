@@ -26,6 +26,13 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
+import {
+  FIRST_MATE_LABEL,
+  fleetRoleLabel,
+  formatModelDisplayName,
+  isFirstMateThread,
+  threadDisplayTitle,
+} from "@t3tools/client-runtime/fleet-threads";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   parseScopedThreadKey,
@@ -44,6 +51,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -59,6 +67,7 @@ import {
   PlusIcon,
   SettingsIcon,
   ShieldQuestionIcon,
+  ShipWheelIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -121,6 +130,7 @@ import {
 } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useStartFirstMateThread } from "../hooks/useStartFirstMateThread";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
@@ -167,6 +177,7 @@ import {
   orderItemsByPreferredIds,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
+  partitionFirstMateThreads,
   resolveAdjacentThreadId,
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
@@ -345,15 +356,23 @@ function SidebarThreadTooltip({
 }) {
   const driverKind = providerEntry?.driverKind ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
+  const isFirstMate = isFirstMateThread(thread);
+  const roleLabel = isFirstMate ? null : fleetRoleLabel(thread);
   return (
     <TooltipPopup side="right" align="start" sideOffset={4} variant="glass">
       {/* The viewport's own inset (py-1 px-2) plus this one make the floating inset. */}
       <div className="flex min-w-0 max-w-80 flex-col gap-2 px-1 py-2">
         <div className="min-w-0 truncate text-xs leading-tight font-medium text-foreground">
-          {thread.title}
+          {threadDisplayTitle(thread)}
         </div>
         <div className="grid gap-1.5 pl-0.5 text-xs text-muted-foreground">
-          {projectDisplayName ? (
+          {roleLabel ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <BotIcon aria-hidden className="size-3 shrink-0 stroke-muted-foreground" />
+              <div className="min-w-0 truncate text-foreground/75">{roleLabel}</div>
+            </div>
+          ) : null}
+          {projectDisplayName && !isFirstMate ? (
             <div className="flex min-w-0 items-center gap-2">
               {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
               <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
@@ -1191,9 +1210,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const selectedModel = providerEntry?.models.find(
     (model) => model.slug === thread.modelSelection.model,
   );
-  const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
-    : thread.modelSelection.model;
+  // What the thread runs on now: the selection moves when the model changes.
+  const modelLabel = formatModelDisplayName(
+    thread.modelSelection.model,
+    selectedModel ? getTriggerDisplayModelLabel(selectedModel) : null,
+  );
+  const isFirstMate = isFirstMateThread(thread);
+  const roleLabel = isFirstMate ? null : fleetRoleLabel(thread);
+  const displayTitle = threadDisplayTitle(thread);
 
   // The local environment is "this machine" and needs no marker; every other
   // one gets its machine glyph. With no local environment (the hosted app)
@@ -1483,9 +1507,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         isRegeneratingTitle && "opacity-[0.55]",
       )}
     >
-      {thread.title}
+      {displayTitle}
     </span>
   );
+  const roleBadge = roleLabel ? (
+    <span
+      data-testid={`sidebar-fleet-role-${thread.id}`}
+      className="min-w-0 truncate text-xs text-muted-foreground/70"
+    >
+      {roleLabel}
+    </span>
+  ) : null;
 
   // Stacks show their layer count; multiple unrelated links show their total count.
   // Plain clicks open T3; individual PR links also support opening the host in a new tab.
@@ -1617,6 +1649,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {draftIndicator}
             {title}
+            {roleBadge}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1761,20 +1794,45 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
-              {props.project ? (
-                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
-              ) : null}
-              {props.projectDisplayName ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectDisplayName}
-                </span>
+              {isFirstMate ? (
+                // First Mate belongs to no project, so it carries its own mark
+                // where every other row shows its project.
+                <>
+                  <ShipWheelIcon
+                    aria-hidden
+                    data-testid="sidebar-first-mate-icon"
+                    className="size-4 shrink-0 text-pink-500 dark:text-pink-400"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-pink-600 dark:text-pink-400">
+                    {FIRST_MATE_LABEL}
+                  </span>
+                </>
               ) : (
-                <span className="flex-1" />
+                <>
+                  {props.project ? (
+                    <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+                  ) : null}
+                  {/* A second mate's label already names its repository, so it
+                      stands in for the project name rather than crowding it. */}
+                  {props.projectDisplayName &&
+                  !(roleBadge && thread.fleetRole === "second-mate") ? (
+                    <span
+                      className={cn(
+                        "truncate text-secondary-label text-xs",
+                        // Beside a role label the project name keeps its width
+                        // up to a cap, and the label gives way first.
+                        roleBadge === null ? "min-w-0 flex-1" : "max-w-[45%] shrink-0",
+                        shouldRecede ? "font-normal" : "font-medium",
+                      )}
+                    >
+                      {props.projectDisplayName}
+                    </span>
+                  ) : null}
+                  {roleBadge}
+                  {props.projectDisplayName === null || roleBadge !== null ? (
+                    <span className="flex-1" />
+                  ) : null}
+                </>
               )}
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
@@ -1928,13 +1986,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
-                  <span className="flex min-w-0 flex-1 text-muted-foreground/40">
+                  <span className="flex min-w-0 text-muted-foreground/40">
                     <MiddleTruncate value={thread.branch} showTitle={false} />
                   </span>
                 </>
-              ) : (
-                <span className="flex-1" />
-              )}
+              ) : null}
+              {/* The model lives here, never in the title, and in a quieter
+                  tone than the title so the two never read as one. */}
+              <span
+                data-testid={`sidebar-model-${thread.id}`}
+                className="shrink-0 whitespace-nowrap text-muted-foreground/70"
+              >
+                {modelLabel}
+              </span>
+              <span className="flex-1" />
               {terminalStatusIcon}
               {prBadge}
               {readOnlyModelBadges}
@@ -2048,9 +2113,11 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   const selectedModel = providerEntry?.models.find(
     (model) => model.slug === thread.modelSelection.model,
   );
-  const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
-    : thread.modelSelection.model;
+  const modelLabel = formatModelDisplayName(
+    thread.modelSelection.model,
+    selectedModel ? getTriggerDisplayModelLabel(selectedModel) : null,
+  );
+  const displayTitle = threadDisplayTitle(thread);
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,
     threadId: thread.id,
@@ -2090,9 +2157,9 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               aria-selected={props.isHighlighted}
               aria-current={props.isRouteActive ? "page" : undefined}
               aria-label={
-                props.projectDisplayName
-                  ? `${thread.title}, ${props.projectDisplayName}`
-                  : thread.title
+                props.projectDisplayName && !isFirstMateThread(thread)
+                  ? `${displayTitle}, ${props.projectDisplayName}`
+                  : displayTitle
               }
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
@@ -2107,12 +2174,17 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             />
           }
         >
-          {props.project ? (
+          {isFirstMateThread(thread) ? (
+            <ShipWheelIcon
+              aria-hidden
+              className="size-4 shrink-0 text-pink-500 dark:text-pink-400"
+            />
+          ) : props.project ? (
             <ProjectFavicon project={props.project} className="size-4 shrink-0" />
           ) : null}
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="flex min-w-0 items-center gap-2.5">
-              <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+              <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
               <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
                 {threadTimeLabel(thread)}
               </span>
@@ -2530,6 +2602,7 @@ export default function Sidebar() {
     readonly assignedKeys: ReadonlyMap<string, string>;
   } | null>(null);
   const {
+    firstMateThreads,
     pinnedThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
@@ -2544,7 +2617,9 @@ export default function Sidebar() {
     // memo exactly at the next wake boundary.
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    const visible = threads.filter(
+    // First Mate takes its own slot above every section, whatever the scope.
+    const { slot: firstMate, rest } = partitionFirstMateThreads(threads);
+    const visible = rest.filter(
       (thread) =>
         thread.archivedAt === null &&
         (scopedProjectKeys === null ||
@@ -2607,6 +2682,7 @@ export default function Sidebar() {
     const sortedPinned = sortPinnedThreadsForSidebar(pinned);
     const sortedActive = sortThreadsForSidebar(active);
     return {
+      firstMateThreads: firstMate,
       pinnedThreads:
         optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
           ? sortedPinned
@@ -2641,8 +2717,14 @@ export default function Sidebar() {
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
+    () => [
+      ...firstMateThreads,
+      ...pinnedThreads,
+      ...activeThreads,
+      ...snoozedThreads,
+      ...settledThreads,
+    ],
+    [activeThreads, firstMateThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
   const searchEnvironmentIds = useMemo(
     () =>
@@ -2779,8 +2861,14 @@ export default function Sidebar() {
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...firstMateThreads,
+      ...pinnedThreads,
+      ...activeThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [firstMateThreads, pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -2868,6 +2956,22 @@ export default function Sidebar() {
     },
     [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
   );
+  const startFirstMateThread = useStartFirstMateThread();
+  const [startingFirstMate, setStartingFirstMate] = useState(false);
+  const handleStartFirstMate = useCallback(() => {
+    setStartingFirstMate(true);
+    void startFirstMateThread()
+      .then(navigateToThread, (error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not start First Mate",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      })
+      .finally(() => setStartingFirstMate(false));
+  }, [navigateToThread, startFirstMateThread]);
 
   // Dropping files on a row opens that thread and attaches the files there.
   // The composer only accepts drops for its OWN thread, so when the row is
@@ -4654,6 +4758,9 @@ export default function Sidebar() {
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
                         sortable?: SortableThreadRowBag,
+                        // The First Mate slot: always a pinned card, and none of
+                        // the lifecycle moves that would take it out of the slot.
+                        firstMateSlot = false,
                       ) => {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
@@ -4680,18 +4787,21 @@ export default function Sidebar() {
                                   : "settle"
                             }
                             settlementSupported={
+                              !firstMateSlot &&
                               serverConfigs.get(thread.environmentId)?.environment.capabilities
                                 .threadSettlement === true
                             }
                             snoozeSupported={
+                              !firstMateSlot &&
                               serverConfigs.get(thread.environmentId)?.environment.capabilities
                                 .threadSnooze === true
                             }
                             pinningSupported={
+                              !firstMateSlot &&
                               serverConfigs.get(thread.environmentId)?.environment.capabilities
                                 .threadPinning === true
                             }
-                            isPinned={thread.pinnedAt != null}
+                            isPinned={firstMateSlot || thread.pinnedAt != null}
                             sortable={sortable}
                             dropVerb={
                               dragState?.activeKey === threadKey
@@ -4781,6 +4891,27 @@ export default function Sidebar() {
                       };
                       const from = dragState?.activeSection ?? null;
                       const items: ReactNode[] = [
+                        ...(firstMateThreads.length > 0
+                          ? firstMateThreads.map((thread) =>
+                              renderThreadRowInner(thread, "pinned", undefined, true),
+                            )
+                          : [
+                              <li key="first-mate-start" className="list-none">
+                                <button
+                                  type="button"
+                                  data-testid="sidebar-start-first-mate"
+                                  disabled={startingFirstMate}
+                                  onClick={handleStartFirstMate}
+                                  className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground disabled:cursor-default disabled:opacity-60"
+                                >
+                                  <ShipWheelIcon
+                                    aria-hidden
+                                    className="size-4 shrink-0 text-pink-500 dark:text-pink-400"
+                                  />
+                                  {startingFirstMate ? "Starting First Mate…" : "New First Mate"}
+                                </button>
+                              </li>,
+                            ]),
                         <SidebarDraftBlock
                           key="draft-sessions"
                           projectByKey={projectByKey}
@@ -4915,7 +5046,8 @@ export default function Sidebar() {
           ) : null}
           {!isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
-          pinnedThreads.length +
+          firstMateThreads.length +
+            pinnedThreads.length +
             activeThreads.length +
             snoozedThreads.length +
             settledThreads.length ===

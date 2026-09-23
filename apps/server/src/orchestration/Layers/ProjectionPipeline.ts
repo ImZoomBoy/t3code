@@ -660,6 +660,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             // means 0.
             readOnly: event.payload.readOnly ? 1 : 0,
             fleetOwned: event.payload.fleetOwned ? 1 : 0,
+            fleetRole: event.payload.fleetRole ?? null,
+            fleetRepo: event.payload.fleetRepo ?? null,
             deletedAt: null,
           });
           return;

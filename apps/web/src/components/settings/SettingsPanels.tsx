@@ -2059,6 +2059,42 @@ function AutoSettleDaysInput({
   );
 }
 
+function FirstMateWorkingDirectoryInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (path: string) => void;
+}) {
+  // A path is typed a character at a time, so it commits on blur or Enter
+  // rather than on every keystroke. An empty field snaps back. The caller
+  // keys this on `value`, so a change from elsewhere starts a fresh draft.
+  const [draft, setDraft] = useState(value);
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed.length === 0) {
+      setDraft(value);
+    } else if (trimmed !== value) {
+      onCommit(trimmed);
+    }
+  };
+
+  return (
+    <Input
+      size="sm"
+      className="w-full sm:w-72"
+      value={draft}
+      spellCheck={false}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") commit();
+      }}
+      aria-label="First Mate working directory"
+    />
+  );
+}
+
 // The legacy rows sit behind the fold, so a settings-search jump has to
 // expand the section before its target can mount and scroll.
 const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
@@ -2287,7 +2323,7 @@ export function GeneralSettingsPanel() {
               serverScoped
               settingKeys={["sidebarAutoSettleOnMerge"]}
               {...searchableSetting("auto-settle-merged-threads")}
-              description="Settle a thread when its pull request merges. Closed pull requests still settle automatically."
+              description="Settle a thread when its pull request merges. Closed pull requests still settle automatically. The First Mate thread never settles automatically."
               resetAction={
                 settings.sidebarAutoSettleOnMerge !==
                 DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge ? (
@@ -2361,6 +2397,32 @@ export function GeneralSettingsPanel() {
             ) : null}
           </>
         ) : null}
+
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("first-mate-working-directory")}
+          description="Where a new First Mate thread runs. First Mate loads its instructions from this folder."
+          resetAction={
+            settings.firstMateWorkingDirectory !==
+            DEFAULT_UNIFIED_SETTINGS.firstMateWorkingDirectory ? (
+              <SettingResetButton
+                label="First Mate working directory"
+                onClick={() =>
+                  updateSettings({
+                    firstMateWorkingDirectory: DEFAULT_UNIFIED_SETTINGS.firstMateWorkingDirectory,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <FirstMateWorkingDirectoryInput
+              key={settings.firstMateWorkingDirectory}
+              value={settings.firstMateWorkingDirectory}
+              onCommit={(path) => updateSettings({ firstMateWorkingDirectory: path })}
+            />
+          }
+        />
       </SettingsSection>
 
       <SettingsSection id="behavior" title="Behavior">

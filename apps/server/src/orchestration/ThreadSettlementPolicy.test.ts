@@ -50,6 +50,18 @@ const decide = (
   }) !== null;
 
 describe("resolveAutoSettlementAt", () => {
+  it("never settles the First Mate thread, merged or idle", () => {
+    const merged: SettlementPullRequest = { state: "merged", mergedAt: NOW };
+    const firstMate = makeThread({ fleetRole: "first-mate" });
+    expect(decide(firstMate, merged)).toBe(false);
+    expect(decide(firstMate, null, { days: 1 })).toBe(false);
+    // The setting still settles every other thread, fleet roles included.
+    expect(decide(makeThread({ fleetRole: "second-mate", fleetRepo: "t3code" }), merged)).toBe(
+      true,
+    );
+    expect(decide(makeThread(), merged)).toBe(true);
+  });
+
   it("returns the last activity time for persisted settlement", () => {
     expect(
       resolveAutoSettlementAt({
