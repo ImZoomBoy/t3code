@@ -89,9 +89,10 @@ export interface AppModelOption {
   isDefault?: boolean;
   isLegacy?: boolean;
   isUnavailable?: boolean;
+  isHidden?: boolean;
 }
 
-function appendUnavailableModelSelection(
+function appendMissingSelectedModel(
   options: AppModelOption[],
   rawModels: ReadonlyArray<ServerProvider["models"][number]>,
   provider: ProviderDriverKind,
@@ -102,9 +103,16 @@ function appendUnavailableModelSelection(
   if (!slug) return options;
   if (provider === "antigravity" && slug === ANTIGRAVITY_DEFAULT_MODEL) return options;
 
-  // A model that exists in the raw catalog can be absent from `options`
-  // because the user hid it. Keep that preference authoritative.
-  if (resolveSelectableModel(provider, slug, rawModels) !== null) return options;
+  // A listed model is absent from `options` when the user hid it. The
+  // selection still runs on it, so it stays by name, marked as hidden.
+  const catalogSlug = resolveSelectableModel(provider, slug, rawModels);
+  if (catalogSlug !== null) {
+    const model = rawModels.find(
+      (candidate) => !candidate.isCustom && candidate.slug === catalogSlug,
+    );
+    if (!model || options.some((option) => option.slug === catalogSlug)) return options;
+    return [...options, { ...toAppModelOption(model), isHidden: true }];
+  }
   if (hiddenModels.includes(slug)) return options;
   if (options.some((option) => option.slug === slug)) return options;
 
@@ -219,7 +227,7 @@ function getAppModelOptions(
   if (provider !== "opencode" && provider !== "antigravity") {
     return applyInstanceModelPreferences(options, preferences);
   }
-  return appendUnavailableModelSelection(
+  return appendMissingSelectedModel(
     applyInstanceModelPreferences(options, preferences),
     rawModels,
     provider,
@@ -267,7 +275,7 @@ export function getAppModelOptionsForInstance(
   }
 
   const preferences = readInstanceModelPreferences(settings, entry.instanceId);
-  return appendUnavailableModelSelection(
+  return appendMissingSelectedModel(
     applyInstanceModelPreferences(options, preferences),
     entry.models,
     entry.driverKind,
@@ -343,14 +351,13 @@ export function splitClaudeContextWindowSuffix(
   const match = CLAUDE_CONTEXT_WINDOW_SUFFIX.exec(selection.model.trim());
   if (!match) return selection;
   const [, baseModel, contextWindow] = match;
+  if (!baseModel || !contextWindow) return selection;
   const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
   if (provider?.driver !== "claudeAgent") return selection;
   const descriptor = provider.models
     .find((model) => !model.isCustom && model.slug === baseModel)
     ?.capabilities?.optionDescriptors?.find((candidate) => candidate.id === "contextWindow");
   if (
-    !baseModel ||
-    !contextWindow ||
     descriptor?.type !== "select" ||
     !descriptor.options.some((option) => option.id === contextWindow)
   ) {

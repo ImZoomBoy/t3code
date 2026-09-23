@@ -281,7 +281,7 @@ describe("instance-scoped model selection", () => {
     ]);
   });
 
-  it("falls back when the selected model is hidden", () => {
+  it("falls back from a hidden model unless the selection is preserved", () => {
     const providers = [
       provider({
         instanceId: "claudeAgent",
@@ -314,7 +314,7 @@ describe("instance-scoped model selection", () => {
         "claude-opus-4-6",
         { preserveUnavailableSelection: true },
       ),
-    ).toBe("claude-sonnet-4-6");
+    ).toBe("claude-opus-4-6");
   });
 
   it("falls back instead of resolving a custom slug against the wrong instance", () => {
@@ -561,7 +561,7 @@ describe("instance-scoped model selection", () => {
       },
     ];
 
-    function composerFor(threadModel: string) {
+    function composerFor(threadModel: string, settings = settingsWithProviderInstances()) {
       const state = deriveEffectiveComposerModelState({
         draft: null,
         providers,
@@ -571,7 +571,7 @@ describe("instance-scoped model selection", () => {
           { id: "effort", value: "medium" },
         ]),
         projectModelSelection: null,
-        settings: settingsWithProviderInstances(),
+        settings,
       });
       const composer = getComposerProviderState({
         provider: driver,
@@ -581,7 +581,7 @@ describe("instance-scoped model selection", () => {
         planModeEnabled: false,
       });
       const pickerOptions = getAppModelOptionsForInstance(
-        settingsWithProviderInstances(),
+        settings,
         deriveProviderInstanceEntries(providers)[0]!,
         state.selectedModel,
       );
@@ -612,6 +612,29 @@ describe("instance-scoped model selection", () => {
           { id: "contextWindow", value: "1m" },
         ]),
       );
+    });
+
+    it("keeps a hidden model by name, marked as hidden, and dispatches it", () => {
+      const settings: UnifiedSettings = {
+        ...settingsWithProviderInstances(),
+        providerModelPreferences: {
+          [instanceId]: { hiddenModels: ["claude-opus-5-5"], modelOrder: [] },
+        },
+      };
+
+      for (const threadModel of ["claude-opus-5-5", "claude-opus-5-5[1m]"]) {
+        const { pickerModel, dispatch } = composerFor(threadModel, settings);
+
+        expect(pickerModel).toEqual(
+          expect.objectContaining({ name: "Claude Opus 5.5", isHidden: true }),
+        );
+        expect(pickerModel?.isUnavailable).toBeUndefined();
+        expect(dispatch.model).toBe("claude-opus-5-5");
+      }
+      expect(composerFor("claude-opus-5-5[1m]", settings).dispatch.options).toContainEqual({
+        id: "contextWindow",
+        value: "1m",
+      });
     });
 
     it("keeps the raw id when the suffix does not name a listed context window", () => {

@@ -83,7 +83,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       ? "Choose model"
       : props.model || "Choose model";
   const triggerLabel = selectedModel
-    ? `${getTriggerDisplayModelLabel(selectedModel)}${selectedModel.isUnavailable ? " (Unavailable)" : ""}`
+    ? `${getTriggerDisplayModelLabel(selectedModel)}${selectedModel.isUnavailable ? " (Unavailable)" : selectedModel.isHidden ? " (Hidden)" : ""}`
     : triggerTitle;
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
@@ -211,6 +211,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           {selectedModel?.isUnavailable ? (
             <Badge variant="outline" size="sm">
               Unavailable
+            </Badge>
+          ) : selectedModel?.isHidden ? (
+            <Badge variant="outline" size="sm">
+              Hidden
             </Badge>
           ) : null}
         </span>
