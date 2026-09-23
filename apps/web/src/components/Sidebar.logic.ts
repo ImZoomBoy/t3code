@@ -904,12 +904,6 @@ export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@t3t
 const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
 
 /**
- * Search the already-ordered sidebar thread collection by title or linked PR,
- * plus any thread whose messages the server matched (`contentMatchKeys`, keyed
- * by `threadSearchMatchKey`). Keeping the input order means lifecycle ordering
- * (active, snoozed, settled) remains stable while the user narrows the list.
- */
-/**
  * Split the First Mate thread out of the sidebar's thread list. First Mate
  * belongs to no project, so it sits in its own slot above every section and
  * ignores the project scope: `slot` holds the live First Mate threads (the
@@ -928,6 +922,12 @@ export function partitionFirstMateThreads<
   return { slot, rest };
 }
 
+/**
+ * Search the already-ordered sidebar thread collection by title or linked PR,
+ * plus any thread whose messages the server matched (`contentMatchKeys`, keyed
+ * by `threadSearchMatchKey`). Keeping the input order means lifecycle ordering
+ * (active, snoozed, settled) remains stable while the user narrows the list.
+ */
 export function searchSidebarThreads<
   T extends {
     readonly environmentId: EnvironmentId;

@@ -93,8 +93,9 @@ sit with their project and carry a **Second mate** or **Worker** label.
 
 When no First Mate thread is live, for example after you archive it, choose **New First Mate**
 at the top of the sidebar to start one. It runs in the folder set in **Settings → General →
-First Mate working directory**, on your default provider. Only one First Mate thread can be live
-at a time.
+First Mate working directory**. The first time, the desktop app asks you to choose that folder
+and saves it. A new First Mate runs on Claude Opus 5.5 with the 1M context at medium effort.
+Only one First Mate thread can be live at a time.
 
 ## Settle finished work
 

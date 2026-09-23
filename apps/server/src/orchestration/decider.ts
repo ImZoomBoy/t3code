@@ -46,6 +46,7 @@ import {
   requireThreadNotArchived,
   requireThreadPromptable,
 } from "./commandInvariants.ts";
+import { isFirstMateThread, resolveFleetRepo } from "./fleetThreads.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
@@ -451,13 +452,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (command.fleetRole === "first-mate") {
+      if (isFirstMateThread(command)) {
         yield* requireNoOtherLiveFirstMateThread({
           readModel,
           command,
           threadId: command.threadId,
         });
       }
+      const fleetRepo = resolveFleetRepo(command);
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -484,11 +486,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           // time a turn arrives.
           fleetOwned: command.issuer === "fleet" ? true : undefined,
           ...(command.fleetRole != null ? { fleetRole: command.fleetRole } : {}),
-          // The First Mate thread works for no one repository, whatever it
-          // was sent.
-          ...(command.fleetRole != null && command.fleetRole !== "first-mate" && command.fleetRepo
-            ? { fleetRepo: command.fleetRepo }
-            : {}),
+          ...(fleetRepo !== null ? { fleetRepo } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -557,7 +555,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (archived.fleetRole === "first-mate") {
+      if (isFirstMateThread(archived)) {
         yield* requireNoOtherLiveFirstMateThread({
           readModel,
           command,
@@ -597,7 +595,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       // The First Mate thread lives for as long as the captain keeps it, so
       // nothing settles it on their behalf. See `isAutoSettlementCandidate`.
-      if (command.type === "thread.auto-settle" && thread.fleetRole === "first-mate") {
+      if (command.type === "thread.auto-settle" && isFirstMateThread(thread)) {
         return yield* Effect.fail(
           new OrchestrationCommandInvariantError({
             commandType: command.type,

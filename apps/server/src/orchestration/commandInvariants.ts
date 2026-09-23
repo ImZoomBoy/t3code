@@ -10,6 +10,7 @@ import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Effect from "effect/Effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { isFirstMateThread } from "./fleetThreads.ts";
 
 function invariantError(commandType: string, detail: string): OrchestrationCommandInvariantError {
   return new OrchestrationCommandInvariantError({
@@ -209,7 +210,7 @@ export function requireNoOtherLiveFirstMateThread(input: {
 }): Effect.Effect<void, OrchestrationCommandInvariantError> {
   const live = input.readModel.threads.find(
     (thread) =>
-      thread.fleetRole === "first-mate" &&
+      isFirstMateThread(thread) &&
       thread.id !== input.threadId &&
       thread.archivedAt === null &&
       thread.deletedAt === null,

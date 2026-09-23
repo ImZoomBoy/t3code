@@ -90,7 +90,16 @@ export const SidebarAutoSettleAfterDays = Schema.Number.check(
 );
 export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
 const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3;
-const DEFAULT_FIRST_MATE_WORKING_DIRECTORY = "C:/00_AI_Development/firstmate";
+// First Mate's own model, whatever the environment's default provider is.
+const DEFAULT_FIRST_MATE_MODEL_SELECTION: ModelSelection = {
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: "claude-opus-5-5",
+  options: [
+    { id: "effort", value: "medium" },
+    { id: "fastMode", value: false },
+    { id: "contextWindow", value: "1m" },
+  ],
+};
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
 export const GlassOpacity = Schema.Int.check(
@@ -1250,8 +1259,11 @@ export const ServerSettings = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Where a new First Mate thread runs. First Mate loads its instructions
   // from this directory, so it is a path on this environment's machine.
-  firstMateWorkingDirectory: TrimmedNonEmptyString.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_FIRST_MATE_WORKING_DIRECTORY)),
+  // Empty until chosen: "New First Mate" asks for it once.
+  firstMateWorkingDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  // The model a new First Mate thread runs on.
+  firstMateModelSelection: ModelSelection.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_FIRST_MATE_MODEL_SELECTION)),
   ),
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
@@ -1586,7 +1598,8 @@ export const ServerSettingsPatch = Schema.Struct({
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
-  firstMateWorkingDirectory: Schema.optionalKey(TrimmedNonEmptyString),
+  firstMateWorkingDirectory: Schema.optionalKey(TrimmedString),
+  firstMateModelSelection: Schema.optionalKey(ModelSelection),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

@@ -18,6 +18,7 @@ import { projectEvent } from "./projector.ts";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 const PROJECT_ID = ProjectId.make("project-1");
+const decodeClientCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 
 function makeThread(
   id: string,
@@ -215,6 +216,27 @@ it.layer(NodeServices.layer)("fleet role decider", (it) => {
       });
       const events = Array.isArray(event) ? event : [event];
       expect(events.map((entry) => entry.type)).toContain("thread.settled");
+    }),
+  );
+
+  it.effect("reads a blank repository as none instead of refusing the create", () =>
+    Effect.gen(function* () {
+      for (const fleetRepo of ["", "   "]) {
+        const command = create("thread-blank", { fleetRole: "worker", fleetRepo });
+        // The wire accepts it, rather than refusing the whole create.
+        yield* decodeClientCommand(command);
+        const event = yield* decideOrchestrationCommand({ command, readModel: makeReadModel([]) });
+        const events = Array.isArray(event) ? event : [event];
+        expect(events[0]?.type).toBe("thread.created");
+        expect(events[0]?.payload).toMatchObject({ fleetRole: "worker" });
+        expect(events[0]?.payload).not.toHaveProperty("fleetRepo");
+      }
+      const padded = yield* decideOrchestrationCommand({
+        command: create("thread-padded", { fleetRole: "worker", fleetRepo: "  t3code " }),
+        readModel: makeReadModel([]),
+      });
+      const events = Array.isArray(padded) ? padded : [padded];
+      expect(events[0]?.payload).toMatchObject({ fleetRepo: "t3code" });
     }),
   );
 

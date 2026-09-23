@@ -2085,6 +2085,7 @@ function FirstMateWorkingDirectoryInput({
       className="w-full sm:w-72"
       value={draft}
       spellCheck={false}
+      placeholder="Chosen when you start First Mate"
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
@@ -2401,7 +2402,7 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("first-mate-working-directory")}
-          description="Where a new First Mate thread runs. First Mate loads its instructions from this folder."
+          description="Where a new First Mate thread runs. First Mate loads its instructions from this folder. If it is empty, New First Mate asks for it once."
           resetAction={
             settings.firstMateWorkingDirectory !==
             DEFAULT_UNIFIED_SETTINGS.firstMateWorkingDirectory ? (

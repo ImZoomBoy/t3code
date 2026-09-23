@@ -27,7 +27,6 @@ import {
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
 import {
-  FIRST_MATE_LABEL,
   fleetRoleLabel,
   formatModelDisplayName,
   isFirstMateThread,
@@ -67,7 +66,6 @@ import {
   PlusIcon,
   SettingsIcon,
   ShieldQuestionIcon,
-  ShipWheelIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -160,6 +158,7 @@ import type { SidebarThreadSummary } from "../types";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { FirstMateIcon } from "./FirstMateIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
@@ -1795,17 +1794,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {isFirstMate ? (
-                // First Mate belongs to no project, so it carries its own mark
-                // where every other row shows its project.
+                // First Mate belongs to no project, so its mark stands where
+                // every other row shows its project. The title names it.
                 <>
-                  <ShipWheelIcon
-                    aria-hidden
-                    data-testid="sidebar-first-mate-icon"
-                    className="size-4 shrink-0 text-pink-500 dark:text-pink-400"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-pink-600 dark:text-pink-400">
-                    {FIRST_MATE_LABEL}
-                  </span>
+                  <FirstMateIcon data-testid="sidebar-first-mate-icon" />
+                  <span className="flex-1" />
                 </>
               ) : (
                 <>
@@ -2178,10 +2171,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           }
         >
           {isFirstMateThread(thread) ? (
-            <ShipWheelIcon
-              aria-hidden
-              className="size-4 shrink-0 text-pink-500 dark:text-pink-400"
-            />
+            <FirstMateIcon />
           ) : props.project ? (
             <ProjectFavicon project={props.project} className="size-4 shrink-0" />
           ) : null}
@@ -2964,15 +2954,20 @@ export default function Sidebar() {
   const handleStartFirstMate = useCallback(() => {
     setStartingFirstMate(true);
     void startFirstMateThread()
-      .then(navigateToThread, (error: unknown) => {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not start First Mate",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      })
+      .then(
+        (threadRef) => {
+          if (threadRef !== null) navigateToThread(threadRef);
+        },
+        (error: unknown) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not start First Mate",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        },
+      )
       .finally(() => setStartingFirstMate(false));
   }, [navigateToThread, startFirstMateThread]);
 
@@ -4899,20 +4894,17 @@ export default function Sidebar() {
                               renderThreadRowInner(thread, "pinned", undefined, true),
                             )
                           : [
-                              <li key="first-mate-start" className="list-none">
-                                <button
-                                  type="button"
+                              <li key="first-mate-start" className="flex list-none">
+                                <Button
+                                  variant="ghost-muted"
                                   data-testid="sidebar-start-first-mate"
                                   disabled={startingFirstMate}
                                   onClick={handleStartFirstMate}
-                                  className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground disabled:cursor-default disabled:opacity-60"
+                                  className="flex-1 justify-start"
                                 >
-                                  <ShipWheelIcon
-                                    aria-hidden
-                                    className="size-4 shrink-0 text-pink-500 dark:text-pink-400"
-                                  />
+                                  <FirstMateIcon />
                                   {startingFirstMate ? "Starting First Mate…" : "New First Mate"}
-                                </button>
+                                </Button>
                               </li>,
                             ]),
                         <SidebarDraftBlock

@@ -1176,9 +1176,10 @@ const ThreadCreateCommandFields = {
   historyImport: Schema.optional(Schema.Literal(true)),
   // Labels, not permissions: they decide where a client shows the thread and
   // what it calls it, so an ordinary client may set them too. The decider
-  // keeps at most one live First Mate thread.
+  // keeps at most one live First Mate thread. A blank `fleetRepo` is read
+  // as none rather than refusing the whole create.
   fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
-  fleetRepo: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  fleetRepo: Schema.optional(Schema.NullOr(Schema.String)),
 } as const;
 
 const ThreadCreateCommand = Schema.Struct({
