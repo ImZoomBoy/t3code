@@ -7,7 +7,7 @@ import { APP_FORK_TAG_LABEL } from "../../branding";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
-import { T3Wordmark } from "../T3Wordmark";
+import { ForkAppIcon } from "../ForkAppIcon";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -82,34 +82,17 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
-      aria-label="Go to threads"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        // Pulled toward the fixed collapse button so the button, icon, and name read as one row.
+        "relative z-10 ml-[calc(var(--workspace-titlebar-content-left)_-_0.375rem)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
     >
-      {/* Center the visible capitals, without the font's ascender/descender space. */}
-      <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-        <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />
-        <span
-          className={cn(
-            "truncate [text-box:trim-both_cap_alphabetic]",
-            onBackdrop ? "text-white/70" : "text-muted-foreground",
-          )}
-        >
-          Code
-        </span>
-      </span>
-      <span
-        className={cn(
-          "shrink-0 rounded-[3px] border px-1 py-px text-[9px] leading-[1.4] font-semibold tracking-[0.08em]",
-          onBackdrop ? "border-white/40 text-white/80" : "border-border text-muted-foreground",
-        )}
-        data-fork-tag=""
-      >
-        {APP_FORK_TAG_LABEL}
-      </span>
+      {/* The icon's AP badge is the visible fork marker; screen readers hear the tag instead. */}
+      <ForkAppIcon aria-hidden className="size-6 shrink-0" data-fork-tag="" />
+      <span className="truncate text-sm font-semibold tracking-tight">T3 Code</span>
+      <span className="sr-only">{APP_FORK_TAG_LABEL}</span>
     </Link>
   );
 }
