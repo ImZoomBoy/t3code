@@ -449,6 +449,8 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             pullRequests: [],
+            readOnly: payload.readOnly,
+            fleetOwned: payload.fleetOwned,
             ...(payload.fleetRole != null ? { fleetRole: payload.fleetRole } : {}),
             ...(payload.fleetRepo != null ? { fleetRepo: payload.fleetRepo } : {}),
             branchPullRequest: null,

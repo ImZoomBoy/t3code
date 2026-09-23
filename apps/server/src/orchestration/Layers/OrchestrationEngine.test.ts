@@ -106,6 +106,7 @@ async function createOrchestrationSystem(
   const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
   return {
     engine,
+    snapshotQuery,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     readThread: (threadId: ThreadId) =>
       runtime.runPromise(snapshotQuery.getThreadDetailById(threadId)),
@@ -760,6 +761,121 @@ describe("OrchestrationEngine", () => {
     const readModelB = await system.readModel();
     expect(readModelB).toEqual(readModelA);
     await system.dispose();
+  });
+
+  it("keeps a fleet thread read-only and fleet-owned in every read model and across a restart", async () => {
+    const createdAt = now();
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-read-only-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    const threadId = ThreadId.make("thread-fleet-worker");
+    const userTurnStart = (commandId: string) =>
+      ({
+        type: "thread.turn.start",
+        commandId: CommandId.make(commandId),
+        threadId,
+        message: {
+          messageId: asMessageId(`${commandId}-message`),
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt,
+      }) as const;
+    const fleetTurnStart = (commandId: string) =>
+      ({ ...userTurnStart(commandId), issuer: "fleet" }) as const;
+    const commandReadModelThread = async () =>
+      (await system.run(system.snapshotQuery.getCommandReadModel())).threads.find(
+        (thread) => thread.id === threadId,
+      );
+
+    let system = await createOrchestrationSystem(databasePath);
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-read-only-project-create"),
+          projectId: asProjectId("project-read-only"),
+          title: "Project",
+          workspaceRoot: "/tmp/project-read-only",
+          defaultModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          createdAt,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-read-only-thread-create"),
+          threadId,
+          projectId: asProjectId("project-read-only"),
+          title: "Worker",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          readOnly: true,
+          issuer: "fleet",
+          createdAt,
+        }),
+      );
+
+      const snapshotThread = (await system.readModel()).threads.find(
+        (thread) => thread.id === threadId,
+      );
+      expect(snapshotThread).toMatchObject({ readOnly: true, fleetOwned: true });
+      expect(Option.getOrThrow(await system.readThread(threadId))).toMatchObject({
+        readOnly: true,
+        fleetOwned: true,
+      });
+      const shell = (await system.run(system.snapshotQuery.getShellSnapshot())).threads.find(
+        (thread) => thread.id === threadId,
+      );
+      expect(shell).toMatchObject({ readOnly: true });
+      expect(
+        Option.getOrThrow(await system.run(system.snapshotQuery.getThreadShellById(threadId))),
+      ).toMatchObject({ readOnly: true });
+      expect(await commandReadModelThread()).toMatchObject({ readOnly: true, fleetOwned: true });
+
+      // The in-memory read model the decider checks is built by the projector.
+      // A user is refused because of readOnly. The fleet gets through only
+      // because of fleetOwned.
+      await expect(
+        system.run(system.engine.dispatch(userTurnStart("cmd-read-only-turn-live"))),
+      ).rejects.toThrow(/read-only/i);
+      await system.run(system.engine.dispatch(fleetTurnStart("cmd-fleet-turn-live")));
+
+      // After a restart the decider's read model comes from the persisted projection.
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+      expect(await commandReadModelThread()).toMatchObject({ readOnly: true, fleetOwned: true });
+      await expect(
+        system.run(system.engine.dispatch(userTurnStart("cmd-read-only-turn-restart"))),
+      ).rejects.toThrow(/read-only/i);
+      await system.run(system.engine.dispatch(fleetTurnStart("cmd-fleet-turn-restart")));
+
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.make("cmd-read-only-thread-archive"),
+          threadId,
+        }),
+      );
+      const archivedShell = (
+        await system.run(system.snapshotQuery.getArchivedShellSnapshot())
+      ).threads.find((thread) => thread.id === threadId);
+      expect(archivedShell).toMatchObject({ readOnly: true });
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("archives and unarchives threads through orchestration commands", async () => {

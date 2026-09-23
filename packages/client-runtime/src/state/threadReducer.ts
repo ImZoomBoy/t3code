@@ -136,6 +136,8 @@ export function applyThreadDetailEvent(
           interactionMode: event.payload.interactionMode,
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
+          readOnly: event.payload.readOnly,
+          fleetOwned: event.payload.fleetOwned,
           branchPullRequest: null,
           latestTurn: null,
           createdAt: event.payload.createdAt,

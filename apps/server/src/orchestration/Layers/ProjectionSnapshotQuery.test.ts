@@ -600,6 +600,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           activeOrderKey: "hq",
           titleRegeneration: null,
           titleState: null,
+          readOnly: false,
+          fleetOwned: false,
           fleetRole: null,
           fleetRepo: null,
           deletedAt: null,
@@ -733,6 +735,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           activeOrderKey: "hq",
           titleRegeneration: null,
           titleState: null,
+          readOnly: false,
           fleetRole: null,
           fleetRepo: null,
           session: {
