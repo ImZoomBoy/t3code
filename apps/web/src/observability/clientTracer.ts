@@ -11,10 +11,6 @@ export function setDelegate(next: Tracer.Tracer | null): void {
   delegate = next;
 }
 
-export function hasDelegate(): boolean {
-  return delegate !== null;
-}
-
 /**
  * Installed once when the client runtime is built, before any exporter exists, so
  * client spans keep flowing to whatever exporter is configured later on.
