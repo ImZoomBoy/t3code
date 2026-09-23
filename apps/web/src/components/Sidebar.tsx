@@ -1992,13 +1992,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </>
               ) : null}
               {/* The model lives here, never in the title, and in a quieter
-                  tone than the title so the two never read as one. */}
-              <span
-                data-testid={`sidebar-model-${thread.id}`}
-                className="shrink-0 whitespace-nowrap text-muted-foreground/70"
-              >
-                {modelLabel}
-              </span>
+                  tone than the title so the two never read as one. A read-only
+                  thread already names it in its model badges. */}
+              {readOnlyModelBadges === null ? (
+                <span
+                  data-testid={`sidebar-model-${thread.id}`}
+                  className="shrink-0 whitespace-nowrap text-muted-foreground/70"
+                >
+                  {modelLabel}
+                </span>
+              ) : null}
               <span className="flex-1" />
               {terminalStatusIcon}
               {prBadge}
