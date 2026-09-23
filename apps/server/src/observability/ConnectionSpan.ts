@@ -155,17 +155,36 @@ export const instrumentClientSocket = Effect.fnUntraced(function* (
   yield* Effect.addFinalizer((exit) => Effect.sync(() => endSpan(exit)));
 
   return Socket.make({
-    runRaw: (handler, runOptions) =>
-      socket
-        .runRaw((data) => {
-          observeIncoming(data);
-          return handler(data);
-        }, runOptions)
-        .pipe(Effect.onExit((exit) => Effect.sync(() => endSpan(exit)))),
-    writer: Effect.map(socket.writer, (write) => (chunk) => {
-      observeOutgoing(chunk);
-      return write(chunk);
-    }),
+    // The socket has no single run to hang the span off any more: it ends when a pull stops
+    // delivering, either because the connection failed or because its scope closed.
+    reader: Effect.map(socket.reader, (reader) => ({
+      pull: reader.pull.pipe(
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            if (Exit.isSuccess(exit)) {
+              for (const data of exit.value) {
+                observeIncoming(data);
+              }
+              return;
+            }
+            endSpan(exit);
+          }),
+        ),
+      ),
+      upgrade: reader.upgrade,
+    })),
+    writer: Effect.map(socket.writer, (writer) => ({
+      write: (chunk) => {
+        observeOutgoing(chunk);
+        return writer.write(chunk);
+      },
+      writeAll: (chunks) => {
+        for (const chunk of chunks) {
+          observeOutgoing(chunk);
+        }
+        return writer.writeAll(chunks);
+      },
+    })),
   });
 });
 

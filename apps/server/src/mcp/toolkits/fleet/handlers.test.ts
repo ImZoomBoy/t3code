@@ -75,6 +75,7 @@ const makeProjectionLayer = (
     getCommandReadModel: () => Effect.die("unused"),
     getSnapshot: () => Effect.die("unused"),
     getShellSnapshot: () => Effect.succeed(makeSnapshot(live)),
+    getDeletedWorktreeThreads: () => Effect.die("unused"),
     getArchivedShellSnapshot: () => Effect.succeed(makeSnapshot(archived)),
     searchThreads: () => Effect.die("unused"),
     getSnapshotSequence: () => Effect.die("unused"),

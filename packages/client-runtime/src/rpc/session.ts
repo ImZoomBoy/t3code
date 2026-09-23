@@ -66,14 +66,25 @@ interface WebSocketCloseInfo {
 // Wraps the platform WebSocketConstructor so we observe the native 'close' event (code + reason)
 // directly from the browser/Electron/RN WebSocket object. Effect's RpcClient protocol layer
 // consumes the same WebSocket instance unmodified; we only attach an extra listener.
+// Effect types the listener payload as its DOM-independent `WebSocketEvent`, which carries no
+// `wasClean`, so that flag is read off the real CloseEvent each client runtime hands over.
+type WebSocketConstructorLike = (
+  url: string,
+  options?: Socket.WebSocketConstructorOptions,
+) => Socket.WebSocketLike;
+
 function instrumentWebSocketConstructor(
-  base: (url: string, protocols?: string | Array<string>) => globalThis.WebSocket,
+  base: WebSocketConstructorLike,
   onClose: (info: WebSocketCloseInfo) => void,
-): (url: string, protocols?: string | Array<string>) => globalThis.WebSocket {
-  return (url, protocols) => {
-    const ws = base(url, protocols);
+): WebSocketConstructorLike {
+  return (url, options) => {
+    const ws = base(url, options);
     ws.addEventListener("close", (event) => {
-      onClose({ code: event.code, reason: event.reason, wasClean: event.wasClean });
+      onClose({
+        code: event.code ?? 0,
+        reason: event.reason ?? "",
+        wasClean: (event as { readonly wasClean?: boolean }).wasClean ?? false,
+      });
     });
     return ws;
   };

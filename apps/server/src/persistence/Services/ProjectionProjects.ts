@@ -56,11 +56,6 @@ export const GetProjectionProjectInput = Schema.Struct({
 });
 export type GetProjectionProjectInput = typeof GetProjectionProjectInput.Type;
 
-export const DeleteProjectionProjectInput = Schema.Struct({
-  projectId: ProjectId,
-});
-export type DeleteProjectionProjectInput = typeof DeleteProjectionProjectInput.Type;
-
 /**
  * ProjectionProjectRepositoryShape - Service API for projected project records.
  */
@@ -80,21 +75,16 @@ export interface ProjectionProjectRepositoryShape {
   ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
 
   /**
-   * List all projected project rows.
+   * List every projected project row, in deterministic creation order.
    *
-   * Returned in deterministic creation order.
+   * The repository identity reactor sweeps these rows on start to find projects
+   * whose stored identity no longer belongs to their workspace root, so it needs
+   * the raw rows rather than a snapshot: the identity columns are not on one.
    */
   readonly listAll: () => Effect.Effect<
     ReadonlyArray<ProjectionProject>,
     ProjectionRepositoryError
   >;
-
-  /**
-   * Soft-delete a projected project row by id.
-   */
-  readonly deleteById: (
-    input: DeleteProjectionProjectInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**

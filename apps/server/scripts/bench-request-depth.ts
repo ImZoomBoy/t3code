@@ -136,13 +136,16 @@ const protocolLayer = (accessToken: string) =>
     Layer.provide(
       Socket.layerWebSocket(wsUrl).pipe(
         Layer.provide(
-          Layer.succeed(
-            Socket.WebSocketConstructor,
-            (socketUrl, protocols) =>
-              new NodeSocket.NodeWS.WebSocket(socketUrl, protocols, {
-                headers: { authorization: `Bearer ${accessToken}` },
-              }) as unknown as globalThis.WebSocket,
-          ),
+          Layer.succeed(Socket.WebSocketConstructor, (socketUrl, options) => {
+            // Effect now hands the constructor either protocols or client options;
+            // the bench only ever needs to add its own authorization header.
+            const positional = typeof options === "string" || Array.isArray(options);
+            const protocols = positional ? options : undefined;
+            const headers = positional ? undefined : options?.headers;
+            return new NodeSocket.NodeWS.WebSocket(socketUrl, protocols, {
+              headers: { ...headers, authorization: `Bearer ${accessToken}` },
+            }) as unknown as Socket.WebSocketLike;
+          }),
         ),
       ),
     ),

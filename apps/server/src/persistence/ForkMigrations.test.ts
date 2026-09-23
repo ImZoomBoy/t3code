@@ -10,7 +10,8 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 // `it.layer` builds its layer once per describe block (a `beforeAll`), so
 // tests sharing one `it.layer` call share one in-memory database. Each test
 // here needs its own fresh database, so each gets its own `it.layer` call.
-const isolatedLayer = () => it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const isolatedLayer = () =>
+  it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 type ColumnInfo = { readonly name: string; readonly notnull: number };
 
@@ -45,6 +46,7 @@ const UPSTREAM_MIGRATIONS_FROM_38 = [
   { migration_id: 50, name: "ProjectionThreadPullRequests" },
   { migration_id: 51, name: "ProjectionThreadMessageContext" },
   { migration_id: 52, name: "ProjectionThreadTitleState" },
+  { migration_id: 53, name: "PullRequestFilesViewed" },
 ];
 
 const EXPECTED_FORK_MIGRATIONS = [

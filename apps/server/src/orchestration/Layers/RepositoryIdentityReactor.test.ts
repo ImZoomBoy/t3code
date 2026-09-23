@@ -101,7 +101,6 @@ const makeHarness = (input: {
       upsert: () => Effect.die("unused"),
       getById: () => Effect.succeed(Option.none()),
       listAll: () => Effect.succeed(input.projects),
-      deleteById: () => Effect.die("unused"),
     });
 
     const resolverLayer = Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
