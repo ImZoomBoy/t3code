@@ -18,6 +18,7 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { pullRequestRefreshChanges } from "@t3tools/shared/pullRequestRefreshes";
 
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -971,7 +972,7 @@ it.effect("shares close, reopen, and merge with an untouched client's mounted PR
       const revision = yield* SubscriptionRef.make(0);
       let state: "open" | "closed" | "merged" = "open";
       const client = {
-        [WS_METHODS.pullRequestsSubscribeRefreshes]: () => SubscriptionRef.changes(revision),
+        [WS_METHODS.pullRequestsSubscribeRefreshes]: () => pullRequestRefreshChanges(revision),
         [WS_METHODS.pullRequestsSummary]: () => Effect.sync(() => ({ state })),
         [WS_METHODS.pullRequestsDetail]: () => Effect.sync(() => ({ state })),
         [WS_METHODS.pullRequestsList]: () =>
@@ -1063,6 +1064,93 @@ it.effect("shares close, reopen, and merge with an untouched client's mounted PR
         );
         stops.forEach((stop) => stop());
       }
+    }),
+  ),
+);
+
+it.effect("opening the panel after a turn starts the detail and activity reads once each", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      // Turns have already run, so the server's revision is past its start.
+      const revision = yield* SubscriptionRef.make(3);
+      const starts = { detail: 0, activity: 0 };
+      const answered = { detail: 0, activity: 0 };
+      const readsStarted = Latch.makeUnsafe();
+      const release = Latch.makeUnsafe();
+      const read = (name: keyof typeof starts) => () =>
+        Effect.gen(function* () {
+          starts[name]++;
+          if (starts.detail > 0 && starts.activity > 0) readsStarted.openUnsafe();
+          yield* release.await;
+          answered[name] = yield* SubscriptionRef.get(revision);
+          return {};
+        });
+      const subscribed = Latch.makeUnsafe();
+      const refreshReached = Latch.makeUnsafe();
+      const client = {
+        // Over a real connection the subscription is answered after the reads are on their way.
+        [WS_METHODS.pullRequestsSubscribeRefreshes]: () =>
+          Stream.unwrap(
+            readsStarted.await.pipe(
+              Effect.andThen(subscribed.open),
+              Effect.as(
+                pullRequestRefreshChanges(revision).pipe(
+                  Stream.tap((value) =>
+                    Effect.sync(() => value === 4 && refreshReached.openUnsafe()),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        [WS_METHODS.pullRequestsDetail]: read("detail"),
+        [WS_METHODS.pullRequestsActivity]: read("activity"),
+      } as unknown as WsRpcProtocolClient;
+      const { atoms, registry } = yield* makeTestRuntime(client);
+      const target = {
+        environmentId: TARGET.environmentId,
+        input: {
+          projectId: ProjectId.make("project-1"),
+          host: "github.example.com",
+          repository: "acme/web",
+          number: 1,
+        },
+      };
+      const reads: ReadonlyArray<
+        readonly [keyof typeof starts, Atom.Atom<AsyncResult.AsyncResult<unknown, unknown>>]
+      > = [
+        ["detail", atoms.detail(target)],
+        ["activity", atoms.activity(target)],
+      ];
+      const unmounts = reads.map(([, atom]) => registry.mount(atom));
+      yield* Effect.addFinalizer(() => Effect.sync(() => unmounts.forEach((unmount) => unmount())));
+      const settledAt = (value: number) =>
+        Effect.forEach(reads, ([name, atom]) =>
+          Effect.gen(function* () {
+            const settled = Latch.makeUnsafe();
+            const stop = registry.subscribe(
+              atom,
+              (result) => {
+                if (AsyncResult.isSuccess(result) && !result.waiting && answered[name] === value) {
+                  settled.openUnsafe();
+                }
+              },
+              { immediate: true },
+            );
+            yield* settled.await;
+            stop();
+          }),
+        );
+
+      yield* subscribed.await;
+      yield* release.open;
+      yield* settledAt(3);
+      // One real refresh marks the end: it reaches the client after anything the subscription
+      // sent on opening, so every start that caused is counted once both reads show it.
+      yield* SubscriptionRef.set(revision, 4);
+      yield* refreshReached.await;
+      yield* settledAt(4);
+      // Once for opening the panel, once for the refresh.
+      expect(starts).toEqual({ detail: 2, activity: 2 });
     }),
   ),
 );

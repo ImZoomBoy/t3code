@@ -1520,18 +1520,12 @@ it.effect("refreshes every reader before a queued merge confirmation finishes", 
       const observedMerge = yield* Stream.runHead(merges).pipe(
         Effect.forkChild({ startImmediately: true }),
       );
-      const readers = yield* Effect.forEach([0, 1], () =>
-        Stream.runHead(service.subscribeRefreshes).pipe(
-          Effect.forkChild({ startImmediately: true }),
-        ),
-      );
+      const readers = yield* Effect.forEach([0, 1], () => nextRefresh(service));
       const action = yield* service
         .runAction({ ...reference, action: "merge" })
         .pipe(Effect.forkChild({ startImmediately: true }));
       yield* Deferred.await(confirmationStarted);
-      const revisions = yield* Effect.forEach(readers, (reader) =>
-        Fiber.join(reader).pipe(Effect.map(Option.getOrThrow)),
-      );
+      const revisions = yield* Effect.forEach(readers, Fiber.join);
       assert.isAbove(revisions[0]!, 0);
       assert.strictEqual(revisions[0], revisions[1]);
       assert.isUndefined(action.pollUnsafe());
@@ -3847,9 +3841,12 @@ it.effect("explicit invalidation refreshes origin readers after a routed host mu
 
       for (const nextState of ["closed", "open"] as const) {
         state = nextState;
+        const notified = yield* nextRefresh(service);
         yield* service.invalidate({ reference }, { notifyReaders: true });
         const result = Option.getOrThrow(yield* Fiber.join(refreshed));
         assert.strictEqual(result.state, nextState);
+        // The earlier reader's first refresh is this one, not one from the silent invalidation.
+        assert.strictEqual(result.revision, yield* Fiber.join(notified));
         assert.isAbove(result.revision, revision);
         revision = result.revision;
         refreshed = yield* nextRead;
@@ -3858,22 +3855,19 @@ it.effect("explicit invalidation refreshes origin readers after a routed host mu
   ),
 );
 
-// A client reloads its open reads on every refresh it hears. Replaying the last one to a panel
-// that just opened made it cancel and restart its detail and activity reads, doubling the
-// host requests.
 it.effect("a reader that subscribes after a turn hears only the refreshes that follow", () =>
   Effect.gen(function* () {
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
       providers: [fakeProvider("github")],
     });
-    const earlier = yield* nextRefresh(service);
+    const firstTurnRefresh = yield* nextRefresh(service);
     yield* service.refreshAfterTurn("p1" as ProjectId);
-    const earlierTurn = yield* Fiber.join(earlier);
+    const firstTurn = yield* Fiber.join(firstTurnRefresh);
 
-    const opened = yield* nextRefresh(service);
+    const refreshAfterSubscribing = yield* nextRefresh(service);
     yield* service.refreshAfterTurn("p1" as ProjectId);
-    assert.isAbove(yield* Fiber.join(opened), earlierTurn);
+    assert.isAbove(yield* Fiber.join(refreshAfterSubscribing), firstTurn);
   }),
 );
 
