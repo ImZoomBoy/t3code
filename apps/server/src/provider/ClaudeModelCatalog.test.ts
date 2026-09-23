@@ -4,6 +4,7 @@ import { ProviderInstanceId } from "@t3tools/contracts";
 import { hasValidClaudeManifestAdapters } from "./ClaudeModelManifest.ts";
 import type { ModelManifestData } from "./ModelManifest.ts";
 import {
+  BUNDLED_CLAUDE_MODEL_CATALOG,
   formatClaudeVersionUpgradeMessage,
   normalizeClaudeCatalogEffort,
   resolveClaudeCatalogApiModelId,
@@ -114,6 +115,30 @@ describe("Claude model catalog", () => {
       }),
       "claude-synthetic-next[large]",
     );
+  });
+
+  // The web composer rewrites `model[x]` to `model` plus contextWindow `x`, so
+  // both forms must spawn the same Claude model id.
+  it("spawns a suffixed model id and its split context window form identically", () => {
+    const catalog = resolveClaudeModelCatalog(manifest());
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    assert.strictEqual(
+      resolveClaudeCatalogApiModelId(catalog, {
+        instanceId,
+        model: "claude-synthetic-next",
+        options: [{ id: "contextWindow", value: "large" }],
+      }),
+      resolveClaudeCatalogApiModelId(catalog, {
+        instanceId,
+        model: "claude-synthetic-next[large]",
+      }),
+    );
+    for (const entry of BUNDLED_CLAUDE_MODEL_CATALOG.models) {
+      const suffixes = entry.runtime.modelSuffixes?.contextWindow ?? {};
+      for (const [optionId, suffix] of Object.entries(suffixes)) {
+        assert.strictEqual(suffix, `[${optionId}]`);
+      }
+    }
   });
 
   it("rejects malformed adapter mappings", () => {

@@ -99,8 +99,8 @@ describe("ProviderModelPicker", () => {
     },
   );
 
-  it.each(["opencode", "antigravity"])(
-    "keeps the selected model label when the %s account catalog does not contain it",
+  it.each(["opencode", "antigravity", "codex", "claudeAgent", "cursor", "grok"])(
+    "keeps the selected model label when the %s catalog does not contain it",
     (driver) => {
       const markup = renderPicker({
         instanceId: "team_runtime",
@@ -111,21 +111,6 @@ describe("ProviderModelPicker", () => {
 
       expect(markup).toContain("missing-model");
       expect(markup).not.toContain("Fallback model");
-    },
-  );
-
-  it.each(["codex", "claudeAgent", "cursor", "grok"])(
-    "uses the first option label for a missing %s model",
-    (driver) => {
-      const markup = renderPicker({
-        instanceId: `${driver}_work`,
-        driver,
-        model: "missing-model",
-        options: [{ slug: "fallback-model", name: "Fallback model" }],
-      });
-
-      expect(markup).toContain("Fallback model");
-      expect(markup).not.toContain(">missing-model<");
     },
   );
 
@@ -144,7 +129,7 @@ describe("ProviderModelPicker", () => {
     expect(markup).not.toContain("Fallback model");
   });
 
-  it("uses the first option when the active instance entry is missing", () => {
+  it("keeps the selected model label when the active instance entry is missing", () => {
     const markup = renderPicker({
       instanceId: "missing_instance",
       driver: "opencode",
@@ -153,8 +138,8 @@ describe("ProviderModelPicker", () => {
       includeEntry: false,
     });
 
-    expect(markup).toContain("Fallback model");
-    expect(markup).not.toContain(">missing-model<");
+    expect(markup).toContain("missing-model");
+    expect(markup).not.toContain("Fallback model");
   });
 
   it("keeps instance initials visible in the resting trigger", () => {

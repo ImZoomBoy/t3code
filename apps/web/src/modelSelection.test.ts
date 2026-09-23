@@ -281,7 +281,7 @@ describe("instance-scoped model selection", () => {
     ]);
   });
 
-  it("falls back when the selected model is hidden", () => {
+  it("falls back from a hidden model unless the selection is preserved", () => {
     const providers = [
       provider({
         instanceId: "claudeAgent",
@@ -314,7 +314,7 @@ describe("instance-scoped model selection", () => {
         "claude-opus-4-6",
         { preserveUnavailableSelection: true },
       ),
-    ).toBe("claude-sonnet-4-6");
+    ).toBe("claude-opus-4-6");
   });
 
   it("falls back instead of resolving a custom slug against the wrong instance", () => {
@@ -349,6 +349,16 @@ describe("instance-scoped model selection", () => {
       driverName: "antigravity",
       availableModel: "gemini-3.1-pro",
       missingModel: "gemini-3.1-pro-high",
+    },
+    {
+      driverName: "claudeAgent",
+      availableModel: "claude-opus-5",
+      missingModel: "claude-unknown-9[1m]",
+    },
+    {
+      driverName: "codex",
+      availableModel: "gpt-5.6-sol",
+      missingModel: "gpt-missing",
     },
   ])("$driverName catalog gaps", ({ driverName, availableModel, missingModel }) => {
     it("preserves a selected model when a catalog refresh no longer contains it", () => {
@@ -482,33 +492,7 @@ describe("instance-scoped model selection", () => {
     });
   });
 
-  it("does not add unavailable options for other providers", () => {
-    const providers = [
-      provider({
-        provider: ProviderDriverKind.make("codex"),
-        instanceId: "codex",
-        models: ["gpt-5.6-sol"],
-      }),
-    ];
-    const entry = deriveProviderInstanceEntries(providers)[0]!;
-
-    expect(
-      getAppModelOptionsForInstance(settingsWithProviderInstances(), entry, "gpt-missing").map(
-        (option) => option.slug,
-      ),
-    ).toEqual(["gpt-5.6-sol"]);
-    expect(
-      resolveAppModelSelectionForInstance(
-        ProviderInstanceId.make("codex"),
-        settingsWithProviderInstances(),
-        providers,
-        "gpt-missing",
-        { preserveUnavailableSelection: true },
-      ),
-    ).toBe("gpt-5.6-sol");
-  });
-
-  it("falls back from an explicit non-OpenCode draft with a missing model", () => {
+  it("keeps an explicit draft model the catalog no longer lists", () => {
     const instanceId = ProviderInstanceId.make("codex");
     const driver = ProviderDriverKind.make("codex");
     const providers = [provider({ provider: driver, instanceId, models: ["gpt-5.6-sol"] })];
@@ -516,9 +500,7 @@ describe("instance-scoped model selection", () => {
       draft: {
         activeProvider: instanceId,
         modelSelectionByProvider: {
-          [instanceId]: createModelSelection(instanceId, "gpt-missing", [
-            { id: "effort", value: "max" },
-          ]),
+          [instanceId]: createModelSelection(instanceId, "gpt-missing"),
         },
       },
       providers,
@@ -528,16 +510,141 @@ describe("instance-scoped model selection", () => {
       projectModelSelection: null,
       settings: settingsWithProviderInstances(),
     });
-    const dispatch = getComposerProviderState({
-      provider: driver,
-      model: state.selectedModel,
-      models: providers[0]!.models,
-      modelOptions: state.modelOptions?.[instanceId],
-      planModeEnabled: false,
+
+    expect(state.selectedModel).toBe("gpt-missing");
+  });
+
+  describe("Claude model ids with a context window suffix", () => {
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    const driver = ProviderDriverKind.make("claudeAgent");
+    const contextWindowCapabilities = {
+      optionDescriptors: [
+        {
+          id: "effort",
+          label: "Reasoning",
+          type: "select" as const,
+          options: [
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High", isDefault: true },
+          ],
+        },
+        {
+          id: "contextWindow",
+          label: "Context Window",
+          type: "select" as const,
+          options: [
+            { id: "200k", label: "200k", isDefault: true },
+            { id: "1m", label: "1M" },
+          ],
+        },
+      ],
+    };
+    const providers: ServerProvider[] = [
+      {
+        ...provider({ provider: driver, instanceId }),
+        models: [
+          {
+            slug: "claude-fable-5-1",
+            name: "Claude Fable 5.1",
+            isCustom: false,
+            isDefault: true,
+            capabilities: contextWindowCapabilities,
+          },
+          {
+            slug: "claude-opus-5-5",
+            name: "Claude Opus 5.5",
+            isCustom: false,
+            capabilities: contextWindowCapabilities,
+          },
+          { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5", isCustom: false, capabilities: {} },
+        ],
+      },
+    ];
+
+    function composerFor(threadModel: string, settings = settingsWithProviderInstances()) {
+      const state = deriveEffectiveComposerModelState({
+        draft: null,
+        providers,
+        selectedProvider: driver,
+        selectedInstanceId: instanceId,
+        threadModelSelection: createModelSelection(instanceId, threadModel, [
+          { id: "effort", value: "medium" },
+        ]),
+        projectModelSelection: null,
+        settings,
+      });
+      const composer = getComposerProviderState({
+        provider: driver,
+        model: state.selectedModel,
+        models: providers[0]!.models,
+        modelOptions: state.modelOptions?.[instanceId],
+        planModeEnabled: false,
+      });
+      const pickerOptions = getAppModelOptionsForInstance(
+        settings,
+        deriveProviderInstanceEntries(providers)[0]!,
+        state.selectedModel,
+      );
+      return {
+        pickerModel: pickerOptions.find((option) => option.slug === state.selectedModel),
+        dispatch: createModelSelection(
+          instanceId,
+          state.selectedModel,
+          composer.modelOptionsForDispatch,
+        ),
+      };
+    }
+
+    it("shows the listed base model with the suffix's context window", () => {
+      const { pickerModel, dispatch } = composerFor("claude-opus-5-5[1m]");
+
+      expect(pickerModel?.name).toBe("Claude Opus 5.5");
+      expect(pickerModel?.isUnavailable).toBeUndefined();
+      expect(dispatch.options).toContainEqual({ id: "contextWindow", value: "1m" });
     });
 
-    expect(state.selectedModel).toBe("gpt-5.6-sol");
-    expect(dispatch.modelOptionsForDispatch).toBeUndefined();
+    it("dispatches the thread's model and options, not the picker default", () => {
+      // The server maps claude-opus-5-5 with contextWindow 1m back to
+      // claude-opus-5-5[1m] at spawn (see ClaudeModelCatalog.test.ts).
+      expect(composerFor("claude-opus-5-5[1m]").dispatch).toEqual(
+        createModelSelection(instanceId, "claude-opus-5-5", [
+          { id: "effort", value: "medium" },
+          { id: "contextWindow", value: "1m" },
+        ]),
+      );
+    });
+
+    it("keeps a hidden model by name, marked as hidden, and dispatches it", () => {
+      const settings: UnifiedSettings = {
+        ...settingsWithProviderInstances(),
+        providerModelPreferences: {
+          [instanceId]: { hiddenModels: ["claude-opus-5-5"], modelOrder: [] },
+        },
+      };
+
+      for (const threadModel of ["claude-opus-5-5", "claude-opus-5-5[1m]"]) {
+        const { pickerModel, dispatch } = composerFor(threadModel, settings);
+
+        expect(pickerModel).toEqual(
+          expect.objectContaining({ name: "Claude Opus 5.5", isHidden: true }),
+        );
+        expect(pickerModel?.isUnavailable).toBeUndefined();
+        expect(dispatch.model).toBe("claude-opus-5-5");
+      }
+      expect(composerFor("claude-opus-5-5[1m]", settings).dispatch.options).toContainEqual({
+        id: "contextWindow",
+        value: "1m",
+      });
+    });
+
+    it("keeps the raw id when the suffix does not name a listed context window", () => {
+      for (const model of ["claude-haiku-4-5[1m]", "claude-opus-5-5[2m]", "claude-unknown-9[1m]"]) {
+        const { pickerModel, dispatch } = composerFor(model);
+
+        expect(pickerModel).toEqual(expect.objectContaining({ name: model, isUnavailable: true }));
+        expect(dispatch.model).toBe(model);
+      }
+    });
   });
 
   it("preserves an explicit draft OpenCode selection while the catalog is empty", () => {

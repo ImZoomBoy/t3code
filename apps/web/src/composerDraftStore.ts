@@ -37,7 +37,11 @@ import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
-import { resolveAppModelSelection, resolveAppModelSelectionForInstance } from "./modelSelection";
+import {
+  resolveAppModelSelection,
+  resolveAppModelSelectionForInstance,
+  splitClaudeContextWindowSuffix,
+} from "./modelSelection";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -1186,12 +1190,19 @@ export function deriveEffectiveComposerModelState(input: {
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
-  const baseModelCandidate =
-    input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null;
+  const threadModelSelection = splitClaudeContextWindowSuffix(
+    input.threadModelSelection,
+    input.providers,
+  );
+  const projectModelSelection = splitClaudeContextWindowSuffix(
+    input.projectModelSelection,
+    input.providers,
+  );
+  const baseModelCandidate = threadModelSelection?.model ?? projectModelSelection?.model ?? null;
   const preserveThreadModel =
     input.selectedInstanceId !== null &&
     input.selectedInstanceId !== undefined &&
-    input.threadModelSelection?.instanceId === input.selectedInstanceId;
+    threadModelSelection?.instanceId === input.selectedInstanceId;
   const baseModel =
     (input.selectedInstanceId
       ? resolveAppModelSelectionForInstance(
@@ -1247,8 +1258,8 @@ export function deriveEffectiveComposerModelState(input: {
     : baseModel;
   const modelOptions =
     modelSelectionByProviderToOptions(input.draft?.modelSelectionByProvider) ??
-    providerSelectionsFromModelSelection(input.threadModelSelection) ??
-    providerSelectionsFromModelSelection(input.projectModelSelection) ??
+    providerSelectionsFromModelSelection(threadModelSelection) ??
+    providerSelectionsFromModelSelection(projectModelSelection) ??
     null;
 
   return {
