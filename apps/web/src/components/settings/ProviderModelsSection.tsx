@@ -484,7 +484,7 @@ export function ProviderModelsSection({
         */}
         <span className="text-[11px] text-muted-foreground/70">
           {capLabels.length > 0 ? (
-            <span className="hidden sm:inline">{capLabels.join(" · ")}</span>
+            <span className="hidden sm:inline">Supports: {capLabels.join(" · ")}</span>
           ) : null}
         </span>
         {rowActions(model, { isHidden, canMoveUp, canMoveDown })}
