@@ -105,6 +105,36 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.session).toBeNull();
       }
     });
+
+    it("keeps the read-only and fleet-owned markers", () => {
+      const result = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 1,
+        occurredAt: "2026-04-01T01:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-2"),
+        type: "thread.created",
+        payload: {
+          threadId: ThreadId.make("thread-2"),
+          projectId: ProjectId.make("project-1"),
+          title: "Worker",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          readOnly: true,
+          fleetOwned: true,
+          createdAt: "2026-04-01T01:00:00.000Z",
+          updatedAt: "2026-04-01T01:00:00.000Z",
+        },
+      });
+
+      expect(result.kind === "updated" ? result.thread : null).toMatchObject({
+        readOnly: true,
+        fleetOwned: true,
+      });
+    });
   });
 
   describe("thread.deleted", () => {

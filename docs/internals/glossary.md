@@ -67,9 +67,13 @@ See [composer context references](./composer-context-references.md) for the cont
 
 ## Fork terms
 
-Terms this fork adds.
+Terms this fork adds. See [worker threads](./acp-worker-threads.md) and
+[environment auth](./environment-auth.md).
 
-| Term              | Meaning                                                                                                                                                                                                  |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Update pill label | The short version label the sidebar update pill shows while a downloaded update waits, for example `v0.0.41 ready`. `getForkUpdatePillLabel` owns the words. One label, never a modal and never a toast. |
-| Fleet role        | `fleetRole` on a thread (`first-mate`, `second-mate`, `worker`) and its `fleetRepo`. Set at creation. Clients label and place threads by it, never by title.                                             |
+| Term               | Meaning                                                                                                                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Read-only thread   | A thread whose transcript is a window onto work driven elsewhere. `readOnly` is set once at creation and never cleared. `requireThreadPromptable` refuses turns and reverts on it.                       |
+| Fleet-owned thread | A read-only thread the First Mate daemon created for itself. `fleetOwned` is set once at creation from the issuer the dispatch entry point stamped.                                                      |
+| Fleet subject      | The session `subject` the First Mate daemon mints its bearer under, `"firstmate"`. It is the read-only exception: the fleet may prompt a read-only thread only when the thread is also fleet-owned.      |
+| Update pill label  | The short version label the sidebar update pill shows while a downloaded update waits, for example `v0.0.41 ready`. `getForkUpdatePillLabel` owns the words. One label, never a modal and never a toast. |
+| Fleet role         | `fleetRole` on a thread (`first-mate`, `second-mate`, `worker`) and its `fleetRepo`. Set at creation. Clients label and place threads by it, never by title.                                             |
