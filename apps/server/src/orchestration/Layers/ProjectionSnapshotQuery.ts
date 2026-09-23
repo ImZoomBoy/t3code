@@ -69,7 +69,6 @@ import {
   encodeThreadDetailPageCursor,
 } from "../threadDetailCursor.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
-import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -391,6 +390,20 @@ function mapSessionRow(
   };
 }
 
+/**
+ * The repository identity a read may serve for a project row.
+ *
+ * `RepositoryIdentityReactor` resolves identities off the read path and records
+ * the workspace root each one came from, so reads never run `git`. A project
+ * that moved folders has a stale stored root; its identity is withheld until
+ * the reactor records the new one. See #72.
+ */
+function storedRepositoryIdentity(
+  row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
+): OrchestrationProject["repositoryIdentity"] {
+  return row.repositoryIdentityWorkspaceRoot === row.workspaceRoot ? row.repositoryIdentity : null;
+}
+
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
   repositoryIdentity: OrchestrationProject["repositoryIdentity"],
@@ -494,8 +507,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const sql = yield* SqlClient.SqlClient;
-  const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
-  const repositoryIdentityResolutionConcurrency = 4;
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
   )(function* (
@@ -508,23 +519,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       options?.includeDeleted === true
         ? projectRows
         : projectRows.filter((row) => row.deletedAt === null);
-    const uniqueWorkspaceRoots = [...new Set(filteredProjectRows.map((row) => row.workspaceRoot))];
-    const repositoryIdentityByWorkspaceRoot = new Map(
-      yield* Effect.forEach(
-        uniqueWorkspaceRoots,
-        (workspaceRoot) =>
-          repositoryIdentityResolver
-            .resolve(workspaceRoot)
-            .pipe(Effect.map((identity) => [workspaceRoot, identity] as const)),
-        { concurrency: repositoryIdentityResolutionConcurrency },
-      ),
-    );
 
     return new Map(
-      filteredProjectRows.map((row) => [
-        row.projectId,
-        repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null,
-      ]),
+      filteredProjectRows.map((row) => [row.projectId, storedRepositoryIdentity(row)]),
     );
   });
 
@@ -3056,24 +3053,22 @@ pending_approval_requests AS (
         Effect.flatMap((option) =>
           Option.isNone(option)
             ? Effect.succeed(Option.none<OrchestrationProject>())
-            : repositoryIdentityResolver.resolve(option.value.workspaceRoot).pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some({
-                    id: option.value.projectId,
-                    title: option.value.title,
-                    workspaceRoot: option.value.workspaceRoot,
-                    repositoryIdentity,
-                    defaultModelSelection: option.value.defaultModelSelection,
-                    defaultThreadEnvMode: option.value.defaultThreadEnvMode,
-                    autoPull: option.value.autoPull === 1,
-                    faviconPath: option.value.faviconPath ?? null,
-                    projectIcon: option.value.projectIcon ?? null,
-                    scripts: option.value.scripts,
-                    createdAt: option.value.createdAt,
-                    updatedAt: option.value.updatedAt,
-                    deletedAt: option.value.deletedAt,
-                  } satisfies OrchestrationProject),
-                ),
+            : Effect.succeed(
+                Option.some({
+                  id: option.value.projectId,
+                  title: option.value.title,
+                  workspaceRoot: option.value.workspaceRoot,
+                  repositoryIdentity: storedRepositoryIdentity(option.value),
+                  defaultModelSelection: option.value.defaultModelSelection,
+                  defaultThreadEnvMode: option.value.defaultThreadEnvMode,
+                  autoPull: option.value.autoPull === 1,
+                  faviconPath: option.value.faviconPath ?? null,
+                  projectIcon: option.value.projectIcon ?? null,
+                  scripts: option.value.scripts,
+                  createdAt: option.value.createdAt,
+                  updatedAt: option.value.updatedAt,
+                  deletedAt: option.value.deletedAt,
+                } satisfies OrchestrationProject),
               ),
         ),
       );
@@ -3108,13 +3103,9 @@ pending_approval_requests AS (
       Effect.flatMap((option) =>
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-          : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
-              .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
-                ),
-              ),
+          : Effect.succeed(
+              Option.some(mapProjectShellRow(option.value, storedRepositoryIdentity(option.value))),
+            ),
       ),
     );
 

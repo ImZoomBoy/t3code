@@ -28,7 +28,7 @@ const PONG_FRAME = JSON.stringify(RpcMessage.constPong);
  * socket died had already given up on our Pongs, which is what a client-side ping timeout looks
  * like from this end. Diagnostic only: nothing here closes or retries a connection.
  */
-export const PING_STARVATION_MS = 20_000;
+const PING_STARVATION_MS = 20_000;
 
 // Codes a websocket may close with without anything having gone wrong.
 const CLEAN_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1001]);

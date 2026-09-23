@@ -4750,7 +4750,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
-        env: McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
+        // This turn's own environment, if it carried one. See
+        // `applyTurnEnvironment` for the PATH prefix rule.
+        env: applyTurnEnvironment(
+          McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
+          input.environment,
+        ),
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession

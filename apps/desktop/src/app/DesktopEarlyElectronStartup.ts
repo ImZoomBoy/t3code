@@ -31,8 +31,18 @@ export interface EarlyLinuxElectronOptions {
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
 
+/**
+ * The fork's own desktop entry name and WM class. See #59.
+ *
+ * Upstream resolves both here and in `DesktopEnvironment.ts`. The pre-ready
+ * startup path writes the entry before app services exist, so the two must
+ * agree or the fork registers its URL scheme against official T3 Code's entry.
+ */
 export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
-  isDevelopment ? "com.t3tools.T3Code.Development.desktop" : "com.t3tools.T3Code.desktop";
+  isDevelopment ? "t3code-fork-dev.desktop" : "t3code-fork.desktop";
+
+export const resolveLinuxWmClass = (isDevelopment: boolean): string =>
+  isDevelopment ? "t3code-fork-dev" : "t3code-fork";
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -88,7 +98,7 @@ export function resolveEarlyLinuxElectronOptions(
   const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
     isDevelopment,
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxWmClass: resolveLinuxWmClass(isDevelopment),
     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,

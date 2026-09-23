@@ -24,10 +24,10 @@ import * as NodeAsyncHooks from "node:async_hooks";
 import * as NodePerfHooks from "node:perf_hooks";
 
 /** Default lag, in milliseconds, below which a tick is not counted as a block. */
-export const DEFAULT_BLOCK_THRESHOLD_MS = 5;
+const DEFAULT_BLOCK_THRESHOLD_MS = 5;
 
 /** One 60Hz frame. Blocks longer than this drop a frame in every client. */
-export const DEFAULT_FRAME_BUDGET_MS = 16;
+const DEFAULT_FRAME_BUDGET_MS = 16;
 
 /** A single block longer than this is a defect, not jitter. */
 export const DEFAULT_FAIL_OVER_MS = 50;

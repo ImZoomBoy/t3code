@@ -92,9 +92,7 @@ export interface FixtureHostMessage {
   readonly params: JsonRecord | undefined;
 }
 
-export function fixtureHostMessages(
-  fixture: AcpTranscriptFixture,
-): ReadonlyArray<FixtureHostMessage> {
+function fixtureHostMessages(fixture: AcpTranscriptFixture): ReadonlyArray<FixtureHostMessage> {
   const messages: Array<FixtureHostMessage> = [];
   for (const entry of fixture.host) {
     if (!isRecord(entry) || typeof entry.method !== "string") {

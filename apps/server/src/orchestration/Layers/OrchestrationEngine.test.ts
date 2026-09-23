@@ -1026,22 +1026,23 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  const raceRepositoryIdentity = (workspaceRoot: string) => ({
+    canonicalKey: "example.test/owner/repository",
+    provider: "github",
+    displayName: "owner/repository",
+    rootPath: workspaceRoot,
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: "https://example.test/owner/repository.git",
+    },
+  });
+
   it.each(["unlink", "relink", "branch", "worktree", "project", "delete"] as const)(
     "rejects PR discovery completed after a newer %s command",
     async (change) => {
       const system = await createOrchestrationSystem(undefined, {
-        resolve: (workspaceRoot) =>
-          Effect.succeed({
-            canonicalKey: "example.test/owner/repository",
-            provider: "github",
-            displayName: "owner/repository",
-            rootPath: workspaceRoot,
-            locator: {
-              source: "git-remote",
-              remoteName: "origin",
-              remoteUrl: "https://example.test/owner/repository.git",
-            },
-          }),
+        resolve: (workspaceRoot) => Effect.succeed(raceRepositoryIdentity(workspaceRoot)),
       });
       // Same-tick links must replace the old PR, not rely on timestamp ordering.
       const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(now()));
@@ -1068,6 +1069,17 @@ describe("OrchestrationEngine", () => {
             workspaceRoot: "/tmp/pr-race-project",
             defaultModelSelection: null,
             createdAt: now(),
+          }),
+        );
+        // The read path serves the identity `RepositoryIdentityReactor` stored
+        // on the row and never resolves one itself, so record it here. See #72.
+        await system.run(
+          system.engine.dispatch({
+            type: "project.repository-identity.record",
+            commandId: CommandId.make("pr-race-project-identity"),
+            projectId,
+            workspaceRoot: "/tmp/pr-race-project",
+            repositoryIdentity: raceRepositoryIdentity("/tmp/pr-race-project"),
           }),
         );
         await system.run(
@@ -1126,6 +1138,19 @@ describe("OrchestrationEngine", () => {
                   },
           ),
         );
+        if (change === "project") {
+          // A moved project withholds its identity until the reactor records
+          // the new root. Record it so the read below still derives the link.
+          await system.run(
+            system.engine.dispatch({
+              type: "project.repository-identity.record",
+              commandId: CommandId.make("pr-race-project-identity-moved"),
+              projectId,
+              workspaceRoot: "/tmp/another-project-root",
+              repositoryIdentity: raceRepositoryIdentity("/tmp/another-project-root"),
+            }),
+          );
+        }
         const command = {
           type: "thread.pull-request.sync",
           commandId: CommandId.make("pr-race-stale-sync"),

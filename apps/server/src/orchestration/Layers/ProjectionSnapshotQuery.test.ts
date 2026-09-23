@@ -53,6 +53,8 @@ it.effect("reads project shells without loading threads or resolving excluded pr
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
     Layer.provide(
+      // The read path serves stored identities and never resolves. See #72.
+      // This stub records any call, so every assertion below expects none.
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
         resolve: (root) =>
           Effect.sync(() => {
@@ -82,11 +84,11 @@ it.effect("reads project shells without loading threads or resolving excluded pr
     const projects = yield* query.getProjectShells().pipe(Effect.withTracer(counter.tracer));
     assert.deepStrictEqual(projects, expected);
     assert.strictEqual(counter.count(), 1);
-    assert.deepStrictEqual(resolved.toSorted(), ["/first", "/second"]);
+    assert.deepStrictEqual(resolved, []);
     resolved.length = 0;
     yield* sql`UPDATE projection_projects SET scripts_json = 'invalid-json' WHERE project_id IN ('p1', 'p3')`;
     assert.deepStrictEqual(yield* query.getProjectShells([asProjectId("p2")]), [expected[1]!]);
-    assert.deepStrictEqual(resolved, ["/second"]);
+    assert.deepStrictEqual(resolved, []);
     resolved.length = 0;
     const beforeEmpty = counter.count();
     assert.deepStrictEqual(
@@ -98,6 +100,117 @@ it.effect("reads project shells without loading threads or resolving excluded pr
     assert.deepStrictEqual(resolved, []);
   }).pipe(Effect.provide(layer));
 });
+
+it.effect(
+  "ProjectionSnapshotQuery serves stored repository identities without resolving any on the read path",
+  () => {
+    // No `RepositoryIdentityResolver` in this stack at all. The read path cannot
+    // resolve an identity, so it can only serve what `RepositoryIdentityReactor`
+    // already recorded on the row. See #72.
+    const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(ThreadBackgroundLiveness.layer),
+      Layer.provide(ThreadPlanProgress.layer),
+      Layer.provideMerge(SqlitePersistenceMemory),
+    );
+
+    const identityJson = (rootPath: string) =>
+      JSON.stringify({
+        canonicalKey: `github.com/acme${rootPath}`,
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: `https://github.com/acme${rootPath}.git`,
+        },
+        rootPath,
+      });
+
+    return Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          repository_identity_json,
+          repository_identity_workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'project-1',
+            'Resolved Project',
+            '/tmp/shared-root',
+            ${identityJson("/tmp/shared-root")},
+            '/tmp/shared-root',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-04-04T00:00:00.000Z',
+            '2026-04-04T00:00:01.000Z',
+            NULL
+          ),
+          (
+            'project-2',
+            'Moved Project',
+            '/tmp/moved-root',
+            ${identityJson("/tmp/shared-root")},
+            '/tmp/shared-root',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-04-04T00:00:02.000Z',
+            '2026-04-04T00:00:03.000Z',
+            NULL
+          ),
+          (
+            'project-3',
+            'Deleted Project',
+            '/tmp/deleted-root',
+            ${identityJson("/tmp/deleted-root")},
+            '/tmp/deleted-root',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-04-04T00:00:04.000Z',
+            '2026-04-04T00:00:05.000Z',
+            '2026-04-04T00:00:06.000Z'
+          )
+      `;
+
+      const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      assert.equal(shellSnapshot.projects.length, 2);
+      assert.equal(shellSnapshot.projects[0]?.repositoryIdentity?.rootPath, "/tmp/shared-root");
+      // The stored identity came from a folder this project no longer lives in,
+      // so it is withheld until the reactor records the new one.
+      assert.equal(shellSnapshot.projects[1]?.repositoryIdentity, null);
+
+      const fullSnapshot = yield* snapshotQuery.getSnapshot();
+      assert.equal(fullSnapshot.projects.length, 3);
+      assert.equal(fullSnapshot.projects[0]?.repositoryIdentity?.rootPath, "/tmp/shared-root");
+      assert.equal(fullSnapshot.projects[1]?.repositoryIdentity, null);
+      assert.equal(fullSnapshot.projects[2]?.repositoryIdentity?.rootPath, "/tmp/deleted-root");
+
+      const byId = yield* snapshotQuery.getProjectShellById(asProjectId("project-2"));
+      assert.equal(Option.isSome(byId), true);
+      assert.equal(Option.isSome(byId) ? byId.value.repositoryIdentity : undefined, null);
+
+      const byRoot = yield* snapshotQuery.getActiveProjectByWorkspaceRoot("/tmp/shared-root");
+      assert.equal(Option.isSome(byRoot), true);
+      assert.equal(
+        Option.isSome(byRoot) ? byRoot.value.repositoryIdentity?.rootPath : undefined,
+        "/tmp/shared-root",
+      );
+    }).pipe(Effect.provide(layer));
+  },
+);
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
@@ -3383,31 +3496,28 @@ projectionSnapshotLayer("ProjectionSnapshotQuery imported sources", (it) => {
 });
 
 it.effect("omits foreign-host PRs from legacy snapshots while preserving native links", () => {
+  // No `RepositoryIdentityResolver` in this stack. The read path serves the
+  // identity `RepositoryIdentityReactor` stored on the row. See #72.
   const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
-    Layer.provide(
-      Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolve: () =>
-          Effect.succeed({
-            canonicalKey: "github.com/acme/web",
-            provider: "github",
-            displayName: "acme/web",
-            locator: {
-              source: "git-remote" as const,
-              remoteName: "origin",
-              remoteUrl: "https://github.com/acme/web.git",
-            },
-          }),
-      }),
-    ),
     Layer.provideMerge(SqlitePersistenceMemory),
   );
+  const storedIdentityJson = JSON.stringify({
+    canonicalKey: "github.com/acme/web",
+    provider: "github",
+    displayName: "acme/web",
+    locator: {
+      source: "git-remote",
+      remoteName: "origin",
+      remoteUrl: "https://github.com/acme/web.git",
+    },
+  });
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const query = yield* ProjectionSnapshotQuery;
-    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
-      VALUES ('project-1', 'Project', '/repo', '[]', '2026-09-09T00:00:00Z', '2026-09-09T00:00:00Z')`;
+    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, repository_identity_json, repository_identity_workspace_root, scripts_json, created_at, updated_at)
+      VALUES ('project-1', 'Project', '/repo', ${storedIdentityJson}, '/repo', '[]', '2026-09-09T00:00:00Z', '2026-09-09T00:00:00Z')`;
     yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
       VALUES ('thread-1', 'project-1', 'Thread', '{"provider":"codex","model":"gpt-5"}', 'full-access', 'default', '2026-09-09T00:00:00Z', '2026-09-09T00:00:00Z')`;
     yield* sql`INSERT INTO projection_thread_pull_requests (thread_id, host, repository, number, url, source, linked_at)

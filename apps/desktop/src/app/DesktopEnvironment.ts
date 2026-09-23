@@ -14,6 +14,10 @@ import * as Path from "effect/Path";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+import {
+  resolveLinuxDesktopEntryName,
+  resolveLinuxWmClass,
+} from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
@@ -239,9 +243,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
       isDevelopment ? `${FORK_APP_ID}.dev` : FORK_APP_ID,
     ),
-    // The fork's own desktop entry and WM class. See #59.
-    linuxDesktopEntryName: isDevelopment ? "t3code-fork-dev.desktop" : "t3code-fork.desktop",
-    linuxWmClass: isDevelopment ? "t3code-fork-dev" : "t3code-fork",
+    // The fork's own desktop entry and WM class. See #59. Both resolve in
+    // DesktopEarlyElectronStartup so the pre-ready path writes the same names.
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
+    linuxWmClass: resolveLinuxWmClass(isDevelopment),
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,
