@@ -22,6 +22,7 @@ export const FORK_APP_ID = "com.autoprintworks.t3code";
 
 const FORK_APP_BASE_NAME = "T3 Code Fork";
 const FORK_TAG_LABEL = "FORK";
+const FORK_BADGE_LABEL = "AP";
 
 export interface ForkBuildIdentity {
   /** The `appId` of every artifact built here, and the signal this seam reads. */
@@ -30,12 +31,15 @@ export interface ForkBuildIdentity {
   readonly appBaseName: string;
   /** Short tag the wordmark carries on every client. */
   readonly tagLabel: string;
+  /** Letters on the badge in the corner of the fork's app icon. */
+  readonly badgeLabel: string;
 }
 
 const FORK_BUILD_IDENTITY: ForkBuildIdentity = {
   appId: FORK_APP_ID,
   appBaseName: FORK_APP_BASE_NAME,
   tagLabel: FORK_TAG_LABEL,
+  badgeLabel: FORK_BADGE_LABEL,
 };
 
 export function resolveForkBuildIdentity(): ForkBuildIdentity {

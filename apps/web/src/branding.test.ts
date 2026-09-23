@@ -69,6 +69,7 @@ describe("branding", () => {
     const branding = await import("./branding");
 
     expect(branding.APP_FORK_TAG_LABEL).toBe("FORK");
+    expect(branding.APP_FORK_BADGE_LABEL).toBe("AP");
     expect(branding.APP_BASE_NAME).toBe("T3 Code Fork");
   });
 

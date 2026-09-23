@@ -35,3 +35,6 @@ export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
  * hosted `npx t3`, and a hosted deploy alike.
  */
 export const APP_FORK_TAG_LABEL = resolveForkBuildIdentity().tagLabel;
+
+/** The letters on the badge of the fork's app icon. */
+export const APP_FORK_BADGE_LABEL = resolveForkBuildIdentity().badgeLabel;

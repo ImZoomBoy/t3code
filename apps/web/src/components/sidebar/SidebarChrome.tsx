@@ -82,6 +82,8 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
+      // The icon's badge is the visible fork marker; screen readers hear the tag in the label.
+      aria-label={`Go to threads, ${APP_FORK_TAG_LABEL}`}
       className={cn(
         // Pulled toward the fixed collapse button so the button, icon, and name read as one row.
         "relative z-10 ml-[calc(var(--workspace-titlebar-content-left)_-_0.375rem)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
@@ -89,10 +91,8 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      {/* The icon's AP badge is the visible fork marker; screen readers hear the tag instead. */}
-      <ForkAppIcon aria-hidden className="size-6 shrink-0" data-fork-tag="" />
+      <ForkAppIcon aria-hidden className="size-6 shrink-0" />
       <span className="truncate text-sm font-semibold tracking-tight">T3 Code</span>
-      <span className="sr-only">{APP_FORK_TAG_LABEL}</span>
     </Link>
   );
 }
