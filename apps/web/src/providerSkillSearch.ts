@@ -75,7 +75,7 @@ export function searchProviderSkills(
   limit = Number.POSITIVE_INFINITY,
 ): ServerProviderSkill[] {
   const pickableSkills = dedupeProviderSkillsByName(skills.filter(isProviderSkillUserInvocable));
-  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
+  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\p{Sc}+/u });
 
   if (!normalizedQuery) {
     return [...pickableSkills];
