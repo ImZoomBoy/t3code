@@ -5,6 +5,7 @@ import {
 } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -616,6 +617,25 @@ const observeRead = Effect.fnUntraced(function* <A, E, R>(read: Effect.Effect<A,
   const observedAt = yield* Clock.currentTimeMillis;
   return { value: yield* read, observedAt };
 });
+
+/**
+ * Callers of the same read share one in-flight host call. A client that restarts a query
+ * cancels its read and sends it again at once, so the new read can join the call that the
+ * cancel is still stopping, and end interrupted though nobody cancelled it. Such a read asks
+ * again, which starts a fresh call, at most twice. A read that is cancelled itself stops as
+ * before: a cancelled fiber skips the retry.
+ */
+const retryIfJoinedCancelledCall = <A, E>(
+  read: Effect.Effect<A, E>,
+  retries = 2,
+): Effect.Effect<A, E> =>
+  read.pipe(
+    Effect.catchCause((cause) =>
+      retries > 0 && Cause.hasInterruptsOnly(cause)
+        ? retryIfJoinedCancelledCall(read, retries - 1)
+        : Effect.failCause(cause),
+    ),
+  );
 
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
@@ -3197,11 +3217,13 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const ref = yield* canonicalRef(input);
         const credential = yield* routingCredential;
-        return yield* read(
-          credential === null
-            ? ref
-            : { ...ref, [credentialNamespace]: credential.credentialFingerprint },
-          ...args,
+        return yield* retryIfJoinedCancelledCall(
+          read(
+            credential === null
+              ? ref
+              : { ...ref, [credentialNamespace]: credential.credentialFingerprint },
+            ...args,
+          ),
         );
       });
 
@@ -3209,10 +3231,12 @@ export const make = Effect.gen(function* () {
     routing,
     routingIdentity,
     withRoutingCredential,
-    list,
+    list: (input) => retryIfJoinedCancelledCall(list(input)),
     listStats: (input) =>
       Effect.forEach(input.refs, (ref) => canonicalRef(ref).pipe(Effect.option)).pipe(
-        Effect.flatMap((refs) => listStats({ ...input, refs: refs.flatMap(Option.toArray) })),
+        Effect.flatMap((refs) =>
+          retryIfJoinedCancelledCall(listStats({ ...input, refs: refs.flatMap(Option.toArray) })),
+        ),
       ),
     summary: credentialCached(summary),
     stack: credentialCached(stack),
