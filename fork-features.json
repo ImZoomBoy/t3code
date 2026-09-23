@@ -159,6 +159,23 @@
       ],
       "test": "apps/server/src/orchestration/decider.fleetRole.test.ts",
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy",
+      "description": "A turn start can ask to wait for an idle thread with whenBusy: \"queue\", so a supervisor's wake never steers into a turn the person just started. The decider holds it while the thread is busy and starts it in the same command that takes the thread idle. It is persisted, so it survives a restart and runs once.",
+      "keep": "ProjectionThreadDeferredTurnStarts.ts and fork migration 9 are ours whole; the whenBusy option, the thread.turn-start-deferred event and the deferredTurnStarts field survive in orchestration.ts, the defer and start rules survive in decider.ts and projector.ts, and the deferred-turn-start table writes and reads survive in ProjectionPipeline.ts and ProjectionSnapshotQuery.ts; everything else in those files takes upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "apps/server/src/orchestration/decider.ts",
+        "apps/server/src/orchestration/projector.ts",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts",
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts",
+        "apps/server/src/persistence/ProjectionThreadDeferredTurnStarts.ts",
+        "apps/server/src/persistence/ForkMigrations/009_ProjectionThreadDeferredTurnStarts.ts",
+        "apps/server/integration/TestProviderAdapter.integration.ts"
+      ],
+      "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
+      "patchesUpstream": true
     }
   ]
 }

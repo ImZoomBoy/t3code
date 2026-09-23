@@ -54,6 +54,8 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadTurnStartDeferredPayload,
+  ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -488,6 +490,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             deletedAt: payload.deletedAt,
+            deferredTurnStarts: [],
             updatedAt: payload.deletedAt,
           }),
         })),
@@ -500,6 +503,9 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             archivedAt: payload.archivedAt,
             titleRegeneration: null,
+            // Archiving is deliberate, so turn starts still waiting are dropped
+            // rather than run on a thread the user put away.
+            deferredTurnStarts: [],
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -830,6 +836,48 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.turn-start-deferred":
+      return decodeForEvent(
+        ThreadTurnStartDeferredPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map(({ threadId, ...deferredTurnStart }) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === threadId
+              ? {
+                  ...thread,
+                  deferredTurnStarts: [...(thread.deferredTurnStarts ?? []), deferredTurnStart],
+                }
+              : thread,
+          ),
+        })),
+      );
+
+    case "thread.turn-start-requested":
+      return decodeForEvent(
+        ThreadTurnStartRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === payload.threadId && (thread.deferredTurnStarts?.length ?? 0) > 0
+              ? {
+                  ...thread,
+                  deferredTurnStarts: thread.deferredTurnStarts?.filter(
+                    (deferred) => deferred.message.messageId !== payload.messageId,
+                  ),
+                }
+              : thread,
+          ),
+        })),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {

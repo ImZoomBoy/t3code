@@ -2270,3 +2270,160 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 });
+
+describe("turn starts that wait for an idle thread", () => {
+  const threadId = ThreadId.make("deferred-thread");
+  const projectId = asProjectId("deferred-project");
+
+  const setSession = (
+    commandId: string,
+    status: "running" | "ready" | "error",
+  ): OrchestrationCommand => ({
+    type: "thread.session.set",
+    commandId: CommandId.make(commandId),
+    threadId,
+    createdAt: now(),
+    session: {
+      threadId,
+      status,
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: status === "running" ? asTurnId("turn-1") : null,
+      lastError: status === "error" ? "The server restarted during this turn." : null,
+      updatedAt: now(),
+    },
+  });
+
+  const queueWake = (
+    commandId: string,
+    extra: Partial<Extract<OrchestrationCommand, { type: "thread.turn.start" }>> = {},
+  ): OrchestrationCommand => ({
+    type: "thread.turn.start",
+    commandId: CommandId.make(commandId),
+    threadId,
+    message: {
+      messageId: asMessageId(`msg-${commandId}`),
+      role: "user",
+      text: `wake from ${commandId}`,
+      attachments: [],
+    },
+    runtimeMode: "full-access",
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    whenBusy: "queue",
+    createdAt: now(),
+    ...extra,
+  });
+
+  /** A project and thread whose turn is running, as a person's turn would be. */
+  async function busyThread(databasePath?: string) {
+    const system = await createOrchestrationSystem(databasePath);
+    await system.run(
+      system.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("deferred-project"),
+        projectId,
+        title: "Deferred turn starts",
+        workspaceRoot: "/tmp/deferred-turn-starts",
+        createdAt: now(),
+      }),
+    );
+    await system.run(
+      system.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("deferred-thread"),
+        threadId,
+        projectId,
+        title: "Deferred turn starts",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: now(),
+      }),
+    );
+    await system.run(system.engine.dispatch(setSession("person-turn-running", "running")));
+    return system;
+  }
+
+  const eventsOf = (system: Awaited<ReturnType<typeof createOrchestrationSystem>>) =>
+    system.run(
+      Stream.runCollect(system.engine.readEvents(0)).pipe(Effect.map((chunk) => Array.from(chunk))),
+    );
+
+  const turnStartsFor = (events: ReadonlyArray<OrchestrationEvent>, commandId: string) =>
+    events.filter(
+      (event) => event.type === "thread.turn-start-requested" && event.commandId === commandId,
+    );
+
+  it("survives a restart and runs once when the thread goes idle", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-deferred-turn-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    let system = await busyThread(databasePath);
+    try {
+      await system.run(system.engine.dispatch(queueWake("wake")));
+      expect(turnStartsFor(await eventsOf(system), "wake")).toHaveLength(0);
+
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+
+      // Startup settles a turn the restart orphaned as an error. That is the
+      // thread going idle, so the waiting wake starts in the same command.
+      await system.run(system.engine.dispatch(setSession("orphaned-turn-settled", "error")));
+      const afterIdle = await eventsOf(system);
+      expect(turnStartsFor(afterIdle, "wake")).toHaveLength(1);
+      expect(
+        afterIdle
+          .filter((event) => event.commandId === "wake")
+          .map((event) => event.type)
+          .slice(1),
+      ).toEqual(["thread.message-sent", "thread.turn-start-requested"]);
+
+      // Neither a later idle transition nor another restart starts it again.
+      await system.run(system.engine.dispatch(setSession("wake-turn-running", "running")));
+      await system.run(system.engine.dispatch(setSession("wake-turn-done", "ready")));
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+      await system.run(system.engine.dispatch(setSession("after-second-restart", "ready")));
+      expect(turnStartsFor(await eventsOf(system), "wake")).toHaveLength(1);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("archiving the thread drops a waiting turn start", async () => {
+    const system = await busyThread();
+    try {
+      await system.run(system.engine.dispatch(queueWake("wake")));
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.make("archive"),
+          threadId,
+        }),
+      );
+      await system.run(system.engine.dispatch(setSession("person-turn-done", "ready")));
+      expect(turnStartsFor(await eventsOf(system), "wake")).toHaveLength(0);
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("refuses a waiting turn start that carries an environment", async () => {
+    const system = await busyThread();
+    try {
+      await expect(
+        system.run(
+          system.engine.dispatch(
+            queueWake("wake", {
+              environment: [{ name: "FM_HOME", value: "/tmp/fm", sensitive: false }],
+            }),
+          ),
+        ),
+      ).rejects.toThrow("cannot carry an environment");
+    } finally {
+      await system.dispose();
+    }
+  });
+});

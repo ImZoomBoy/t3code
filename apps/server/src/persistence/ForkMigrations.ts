@@ -43,6 +43,7 @@ import ForkMigration0005 from "./ForkMigrations/005_ProjectionThreadsReadOnly.ts
 import ForkMigration0006 from "./ForkMigrations/006_DropTranscriptSequence.ts";
 import ForkMigration0007 from "./ForkMigrations/007_ProjectionThreadsFleetOwned.ts";
 import ForkMigration0008 from "./ForkMigrations/008_ProjectionThreadsFleetRole.ts";
+import ForkMigration0009 from "./ForkMigrations/009_ProjectionThreadDeferredTurnStarts.ts";
 
 const FORK_MIGRATIONS_TABLE = "fork_sql_migrations";
 
@@ -95,6 +96,7 @@ const forkMigrationEntries = [
   [6, "DropTranscriptSequence", ForkMigration0006],
   [7, "ProjectionThreadsFleetOwned", ForkMigration0007],
   [8, "ProjectionThreadsFleetRole", ForkMigration0008],
+  [9, "ProjectionThreadDeferredTurnStarts", ForkMigration0009],
 ] as const;
 
 const makeForkMigrationLoader = () =>

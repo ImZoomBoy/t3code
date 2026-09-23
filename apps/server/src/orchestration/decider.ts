@@ -8,7 +8,9 @@ import {
   isImportedAgentSessionMessageId,
   type OrchestrationCommand,
   type OrchestrationEvent,
+  type OrchestrationDeferredTurnStart,
   type OrchestrationReadModel,
+  type OrchestrationSessionStatus,
   type OrchestrationThread,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
@@ -206,6 +208,119 @@ function withEventBase(
 }
 
 type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
+
+type TurnStart = Omit<OrchestrationDeferredTurnStart, "deferredAt">;
+
+const isBusySessionStatus = (status: OrchestrationSessionStatus | undefined) =>
+  status === "starting" || status === "running";
+
+/**
+ * Whether a turn start now would land inside another turn: one is running, one
+ * is being started, a user message is waiting for a turn to adopt it, or
+ * earlier turn starts are still waiting. Erring towards busy only delays a
+ * waiting turn start; erring the other way merges it into someone's turn.
+ */
+function threadIsBusy(thread: OrchestrationThread, now: string): boolean {
+  return (
+    isBusySessionStatus(thread.session?.status) ||
+    hasQueuedTurnStartForThread(thread, now) ||
+    (thread.deferredTurnStarts?.length ?? 0) > 0
+  );
+}
+
+/**
+ * The events that start a turn on `thread`: the lifecycle resets a turn
+ * implies, the user message, and the request the provider reactor acts on.
+ * They carry the command id of the turn start that asked for them, which for a
+ * turn start that waited is not the command being decided.
+ */
+const turnStartEvents = Effect.fn("turnStartEvents")(function* (input: {
+  readonly thread: OrchestrationThread;
+  readonly turnStart: TurnStart;
+  readonly startedAt: string;
+}) {
+  const { thread, turnStart, startedAt } = input;
+  const threadId = thread.id;
+  const eventBase = () =>
+    withEventBase({
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      occurredAt: startedAt,
+      commandId: turnStart.commandId,
+    });
+  // A worktree bootstrap persists the message ahead of the turn with
+  // `thread.message.user.append`; the turn then only references it.
+  const persistedUserMessage = thread.messages.find(
+    (message) =>
+      message.id === turnStart.message.messageId &&
+      message.role === "user" &&
+      message.turnId === null,
+  );
+  const userMessageEvent: PlannedOrchestrationEvent | null = persistedUserMessage
+    ? null
+    : {
+        ...(yield* eventBase()),
+        type: "thread.message-sent",
+        payload: {
+          threadId,
+          messageId: turnStart.message.messageId,
+          role: "user",
+          text: turnStart.message.text,
+          attachments: turnStart.message.attachments,
+          ...(turnStart.message.context !== undefined
+            ? { context: turnStart.message.context }
+            : {}),
+          turnId: null,
+          streaming: false,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+        },
+      };
+  const turnStartRequestedEvent: PlannedOrchestrationEvent = {
+    ...(yield* eventBase()),
+    ...(userMessageEvent ? { causationEventId: userMessageEvent.eventId } : {}),
+    type: "thread.turn-start-requested",
+    payload: {
+      threadId,
+      messageId: turnStart.message.messageId,
+      ...(turnStart.modelSelection !== undefined
+        ? { modelSelection: turnStart.modelSelection }
+        : {}),
+      ...(turnStart.titleSeed !== undefined ? { titleSeed: turnStart.titleSeed } : {}),
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      ...(turnStart.sourceProposedPlan !== undefined
+        ? { sourceProposedPlan: turnStart.sourceProposedPlan }
+        : {}),
+      createdAt: startedAt,
+    },
+  };
+  // Real activity resets ANY override: it wakes an explicitly settled
+  // thread, and it clears a keep-active pin back to neutral so the
+  // thread can auto-settle again after this burst of work goes stale.
+  // A snooze clears the same way - sending a message to a snoozed
+  // thread is the user re-engaging, so the return ticket is spent.
+  const lifecycleResetEvents: Array<PlannedOrchestrationEvent> = [];
+  if (thread.settledOverride !== null) {
+    lifecycleResetEvents.push({
+      ...(yield* eventBase()),
+      type: "thread.unsettled",
+      payload: { threadId, reason: "activity", updatedAt: startedAt },
+    });
+  }
+  if (thread.snoozedUntil != null) {
+    lifecycleResetEvents.push({
+      ...(yield* eventBase()),
+      type: "thread.unsnoozed",
+      payload: { threadId, reason: "activity", updatedAt: startedAt },
+    });
+  }
+  return [
+    ...lifecycleResetEvents,
+    ...(userMessageEvent ? [userMessageEvent] : []),
+    turnStartRequestedEvent,
+  ];
+});
 
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
@@ -1529,104 +1644,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         notBefore: targetThread.updatedAt,
         serverNow: yield* nowIso,
       });
-      // A worktree bootstrap persists the message ahead of the turn with
-      // `thread.message.user.append`; the turn then only references it.
-      const persistedUserMessage = targetThread.messages.find(
-        (message) =>
-          message.id === command.message.messageId &&
-          message.role === "user" &&
-          message.turnId === null,
-      );
-      const userMessageEvent: Omit<OrchestrationEvent, "sequence"> | null = persistedUserMessage
-        ? null
-        : {
+      const turnStart = {
+        commandId: command.commandId,
+        message: command.message,
+        ...(command.modelSelection !== undefined ? { modelSelection: command.modelSelection } : {}),
+        ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
+        ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+      };
+      if (command.whenBusy === "queue") {
+        // The environment is kept out of every event, so a turn start that
+        // waits could not carry it across a restart. Refuse it rather than
+        // start the turn later without it.
+        if (command.environment !== undefined) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "A turn start that waits for an idle thread cannot carry an environment.",
+          });
+        }
+        const deferredAt = yield* nowIso;
+        if (threadIsBusy(targetThread, deferredAt)) {
+          return {
             ...(yield* withEventBase({
               aggregateKind: "thread",
               aggregateId: command.threadId,
-              occurredAt: turnStartedAt,
+              occurredAt: deferredAt,
               commandId: command.commandId,
             })),
-            type: "thread.message-sent",
-            payload: {
-              threadId: command.threadId,
-              messageId: command.message.messageId,
-              role: "user",
-              text: command.message.text,
-              attachments: command.message.attachments,
-              ...(command.message.context !== undefined
-                ? { context: command.message.context }
-                : {}),
-              turnId: null,
-              streaming: false,
-              createdAt: turnStartedAt,
-              updatedAt: turnStartedAt,
-            },
+            type: "thread.turn-start-deferred",
+            payload: { threadId: command.threadId, ...turnStart, deferredAt },
           };
-      const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: turnStartedAt,
-          commandId: command.commandId,
-        })),
-        ...(userMessageEvent ? { causationEventId: userMessageEvent.eventId } : {}),
-        type: "thread.turn-start-requested",
-        payload: {
-          threadId: command.threadId,
-          messageId: command.message.messageId,
-          ...(command.modelSelection !== undefined
-            ? { modelSelection: command.modelSelection }
-            : {}),
-          ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
-          runtimeMode: targetThread.runtimeMode,
-          interactionMode: targetThread.interactionMode,
-          ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
-          createdAt: turnStartedAt,
-        },
-      };
-      // Real activity resets ANY override: it wakes an explicitly settled
-      // thread, and it clears a keep-active pin back to neutral so the
-      // thread can auto-settle again after this burst of work goes stale.
-      // A snooze clears the same way — sending a message to a snoozed
-      // thread is the user re-engaging, so the return ticket is spent.
-      const lifecycleResetEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
-      if (targetThread.settledOverride !== null) {
-        lifecycleResetEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: turnStartedAt,
-            commandId: command.commandId,
-          })),
-          type: "thread.unsettled",
-          payload: {
-            threadId: command.threadId,
-            reason: "activity",
-            updatedAt: turnStartedAt,
-          },
-        });
+        }
       }
-      if (targetThread.snoozedUntil != null) {
-        lifecycleResetEvents.push({
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: turnStartedAt,
-            commandId: command.commandId,
-          })),
-          type: "thread.unsnoozed",
-          payload: {
-            threadId: command.threadId,
-            reason: "activity",
-            updatedAt: turnStartedAt,
-          },
-        });
-      }
-      return [
-        ...lifecycleResetEvents,
-        ...(userMessageEvent ? [userMessageEvent] : []),
-        turnStartRequestedEvent,
-      ];
+      return yield* turnStartEvents({ thread: targetThread, turnStart, startedAt: turnStartedAt });
     }
 
     case "thread.message.user.append": {
@@ -2023,7 +2072,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command.session.status === "starting" || command.session.status === "running";
       // Real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !isSessionActivity) {
-        return sessionSetEvent;
+        const deferredTurnStart = thread.deferredTurnStarts?.[0];
+        const now = yield* nowIso;
+        // The session going idle is the moment a waiting turn start runs. It
+        // starts in this same command, so nothing can start a turn between
+        // the thread going idle and the waiting one starting. One runs per
+        // idle transition; the next waits for that turn to end.
+        if (
+          deferredTurnStart === undefined ||
+          threadIsBusy({ ...thread, session: command.session, deferredTurnStarts: [] }, now)
+        ) {
+          return sessionSetEvent;
+        }
+        return [
+          sessionSetEvent,
+          ...(yield* turnStartEvents({
+            thread,
+            turnStart: deferredTurnStart,
+            startedAt:
+              compareDateTimeStrings(now, command.createdAt) >= 0 ? now : command.createdAt,
+          })),
+        ];
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
