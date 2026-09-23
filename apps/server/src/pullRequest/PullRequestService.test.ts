@@ -543,6 +543,14 @@ function fakeProvider(
   };
 }
 
+/** Listens for the next refresh. Refreshes are not replayed, so start this before acting. */
+function nextRefresh(service: { readonly subscribeRefreshes: Stream.Stream<number> }) {
+  return Stream.runHead(service.subscribeRefreshes).pipe(
+    Effect.map(Option.getOrThrow),
+    Effect.forkChild({ startImmediately: true }),
+  );
+}
+
 function makeService(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly providers: ReadonlyArray<PullRequestProviderApi>;
@@ -1462,14 +1470,13 @@ it.effect("publishes a merge for immediate settlement only after host confirmati
       );
 
       // Queueing succeeds while the host still reports an open PR.
+      const queued = yield* nextRefresh(service);
       yield* service.runAction({ ...reference, action: "merge" });
-      const queuedRefresh = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
+      const queuedRefresh = yield* Fiber.join(queued);
       confirmationFails = true;
+      const unconfirmed = yield* nextRefresh(service);
       yield* service.runAction({ ...reference, action: "merge" });
-      assert.isAbove(
-        Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes)),
-        queuedRefresh,
-      );
+      assert.isAbove(yield* Fiber.join(unconfirmed), queuedRefresh);
       confirmationFails = false;
       state = "merged";
       yield* TestClock.setTime(Date.parse(mergedAt));
@@ -1513,18 +1520,12 @@ it.effect("refreshes every reader before a queued merge confirmation finishes", 
       const observedMerge = yield* Stream.runHead(merges).pipe(
         Effect.forkChild({ startImmediately: true }),
       );
-      const readers = yield* Effect.forEach([0, 1], () =>
-        Stream.runHead(service.subscribeRefreshes).pipe(
-          Effect.forkChild({ startImmediately: true }),
-        ),
-      );
+      const readers = yield* Effect.forEach([0, 1], () => nextRefresh(service));
       const action = yield* service
         .runAction({ ...reference, action: "merge" })
         .pipe(Effect.forkChild({ startImmediately: true }));
       yield* Deferred.await(confirmationStarted);
-      const revisions = yield* Effect.forEach(readers, (reader) =>
-        Fiber.join(reader).pipe(Effect.map(Option.getOrThrow)),
-      );
+      const revisions = yield* Effect.forEach(readers, Fiber.join);
       assert.isAbove(revisions[0]!, 0);
       assert.strictEqual(revisions[0], revisions[1]);
       assert.isUndefined(action.pollUnsafe());
@@ -2807,16 +2808,15 @@ it.effect("invalidates the cached activity after reacting, like the other mutati
       ],
     });
 
+    const turn = yield* nextRefresh(service);
     yield* service.refreshAfterTurn(reference.projectId);
-    const previousRefresh = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
+    const previousRefresh = yield* Fiber.join(turn);
     yield* service.activity(reference);
     assert.strictEqual(activityCalls, 1);
 
+    const reaction = yield* nextRefresh(service);
     yield* service.setReaction({ ...reference, content: "heart", reacted: true });
-    assert.isAbove(
-      Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes)),
-      previousRefresh,
-    );
+    assert.isAbove(yield* Fiber.join(reaction), previousRefresh);
     yield* service.activity(reference);
 
     assert.strictEqual(activityCalls, 2);
@@ -3743,8 +3743,9 @@ it.effect("explicit and turn invalidations make the next listing ask the host ag
     yield* service.invalidate({ reference });
     yield* service.list({ state: "open" });
     assert.strictEqual(hostCalls, 2);
+    const turn = yield* nextRefresh(service);
     yield* service.refreshAfterTurn("p1" as ProjectId);
-    const refresh = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
+    const refresh = yield* Fiber.join(turn);
     yield* service.list({ state: "open" });
     assert.isAbove(refresh, 0);
     assert.strictEqual(hostCalls, 3);
@@ -3782,7 +3783,6 @@ it.effect("close and reopen notify subscribed readers after invalidating their c
       assert.strictEqual((yield* service.summary(reference)).state, "open");
       for (const action of ["close", "reopen"] as const) {
         const refreshed = yield* service.subscribeRefreshes.pipe(
-          Stream.drop(1),
           Stream.take(1),
           Stream.mapEffect(() =>
             Effect.gen(function* () {
@@ -3820,37 +3820,55 @@ it.effect("explicit invalidation refreshes origin readers after a routed host mu
           }),
         ],
       });
-      yield* service.refreshAfterTurn(reference.projectId);
-      let revision = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
-      // The sync reactor invalidates before reading; it must not notify itself again.
-      yield* service.invalidate({ reference });
-      assert.strictEqual(
-        Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes)),
-        revision,
+      const nextRead = service.subscribeRefreshes.pipe(
+        Stream.take(1),
+        Stream.mapEffect((nextRevision) =>
+          service
+            .summary(reference)
+            .pipe(Effect.map((summary) => ({ revision: nextRevision, state: summary.state }))),
+        ),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
       );
+      const turn = yield* nextRefresh(service);
+      yield* service.refreshAfterTurn(reference.projectId);
+      let revision = yield* Fiber.join(turn);
+      // The sync reactor invalidates before reading; it must not notify itself again. The first
+      // reader listens across it, so a notification here would reach it before "closed" does.
+      let refreshed = yield* nextRead;
+      yield* service.invalidate({ reference });
       assert.strictEqual((yield* service.summary(reference)).state, "open");
 
       for (const nextState of ["closed", "open"] as const) {
-        const refreshed = yield* service.subscribeRefreshes.pipe(
-          Stream.drop(1),
-          Stream.take(1),
-          Stream.mapEffect((nextRevision) =>
-            service
-              .summary(reference)
-              .pipe(Effect.map((summary) => ({ revision: nextRevision, state: summary.state }))),
-          ),
-          Stream.runHead,
-          Effect.forkChild({ startImmediately: true }),
-        );
         state = nextState;
+        const notified = yield* nextRefresh(service);
         yield* service.invalidate({ reference }, { notifyReaders: true });
         const result = Option.getOrThrow(yield* Fiber.join(refreshed));
         assert.strictEqual(result.state, nextState);
+        // The earlier reader's first refresh is this one, not one from the silent invalidation.
+        assert.strictEqual(result.revision, yield* Fiber.join(notified));
         assert.isAbove(result.revision, revision);
         revision = result.revision;
+        refreshed = yield* nextRead;
       }
     }),
   ),
+);
+
+it.effect("a reader that subscribes after a turn hears only the refreshes that follow", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [fakeProvider("github")],
+    });
+    const firstTurnRefresh = yield* nextRefresh(service);
+    yield* service.refreshAfterTurn("p1" as ProjectId);
+    const firstTurn = yield* Fiber.join(firstTurnRefresh);
+
+    const refreshAfterSubscribing = yield* nextRefresh(service);
+    yield* service.refreshAfterTurn("p1" as ProjectId);
+    assert.isAbove(yield* Fiber.join(refreshAfterSubscribing), firstTurn);
+  }),
 );
 
 it.effect("does not cache a failed listing", () =>

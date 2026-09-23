@@ -4,6 +4,7 @@ import {
   sourceControlRepositorySelector,
 } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import { pullRequestRefreshChanges } from "@t3tools/shared/pullRequestRefreshes";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -205,6 +206,7 @@ export class PullRequestService extends Context.Service<
       never,
       Scope.Scope
     >;
+    /** Each refresh after subscribing; see `pullRequestRefreshChanges`. */
     readonly subscribeRefreshes: Stream.Stream<number>;
     readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
@@ -3243,9 +3245,7 @@ export const make = Effect.gen(function* () {
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
-    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes).pipe(
-      Stream.filter((revision) => revision > 0),
-    ),
+    subscribeRefreshes: pullRequestRefreshChanges(pullRequestRefreshes),
     refreshAfterTurn,
     detail: credentialCached(detail),
     activity: credentialCached(activity),
