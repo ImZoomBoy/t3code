@@ -32,9 +32,10 @@ describe("Windows console suppression is wired into the server entry points", ()
     const source = read("serviceLauncher.ts");
     // The launcher ships as a standalone bundle limited to Node built-ins, so it
     // sets the flag by hand instead of installing the shared hook. Its one spawn
-    // targets `process.execPath`, which is console-subsystem, so the flag is the
-    // same decision the hook would make.
-    const spawn = source.slice(source.indexOf("NodeChildProcess.spawn(process.execPath"));
-    expect(spawn.slice(0, 800)).toContain("windowsHide: true");
+    // targets the packaged `t3` runtime, which is console-subsystem, so the flag
+    // is the same decision the hook would make.
+    const spawnAt = source.indexOf("NodeChildProcess.spawn(");
+    expect(spawnAt).toBeGreaterThan(-1);
+    expect(source.slice(spawnAt, spawnAt + 800)).toContain("windowsHide: true");
   });
 });

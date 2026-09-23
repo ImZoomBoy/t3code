@@ -119,6 +119,8 @@ describe("sweepThreadCheckpointRefs", () => {
       getThreadDetailById: () => Effect.die("unused"),
       getThreadDetailSnapshot: () => Effect.die("unused"),
       getThreadLifecycleById: () => Effect.die("unused"),
+      listActivitiesByKind: () => Effect.die("unused"),
+      getProjectShells: () => Effect.die("unused"),
     });
 
   const makeCheckpointStoreLayer = (

@@ -67,6 +67,7 @@ it("exports exact object result schemas for preview actions", () => {
   for (const name of actionNames) {
     expect(Tool.getJsonSchemaFromSchema(PreviewToolkit.tools[name].successSchema)).toEqual({
       type: "object",
+      properties: { toolIcon: expect.any(Object) },
       additionalProperties: false,
       description: "The preview action completed successfully.",
     });
@@ -87,7 +88,7 @@ const PREVIEW_DECLARED_SURFACE: Readonly<Record<string, ReadonlyArray<string>>> 
   preview_resize: ["height", "mode", "orientation", "preset", "tabId", "timeoutMs", "width"],
   preview_scroll: ["deltaX", "deltaY", "locator", "selector", "tabId"],
   preview_set_appearance: ["colorScheme", "tabId"],
-  preview_snapshot: ["includeImage", "tabId"],
+  preview_snapshot: ["includeImage", "save", "tabId"],
   preview_status: ["tabId"],
   preview_type: ["clear", "locator", "selector", "tabId", "text", "timeoutMs"],
   preview_wait_for: ["locator", "selector", "tabId", "text", "timeoutMs", "urlIncludes"],

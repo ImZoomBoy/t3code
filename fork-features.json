@@ -4,12 +4,14 @@
     {
       "name": "fork-app-identity",
       "description": "The fork installs and runs beside official T3 Code: its own app id, product name, state directory (~/.t3-fork) and t3code-fork:// URL scheme. Issues #34 and #59.",
-      "keep": "Our app id, product name, window title, ~/.t3-fork state directory and t3code-fork:// URL scheme replace upstream's wherever these files set them; take upstream for the rest of these files, then re-apply those settings on top.",
+      "keep": "Our app id, product name, window title, ~/.t3-fork state directory, t3code-fork:// URL scheme and Linux desktop entry name and WM class replace upstream's wherever these files set them; take upstream for the rest of these files, then re-apply those settings on top.",
       "files": [
         "apps/desktop/src/app/DesktopEnvironment.ts",
+        "apps/desktop/src/app/DesktopEarlyElectronStartup.ts",
         "apps/desktop/src/app/DesktopLinuxUrlHandler.ts",
         "apps/desktop/src/electron/ElectronProtocol.ts",
         "apps/desktop/src/app/DesktopEnvironment.test.ts",
+        "apps/desktop/src/app/DesktopPreReadyPlatform.test.ts",
         "apps/desktop/src/window/DesktopWindow.test.ts"
       ],
       "test": "apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts",
@@ -72,6 +74,20 @@
         "docs/internals/glossary.md"
       ],
       "test": "apps/desktop/src/updates/forkAutomaticUpdates.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fork-repository-identity-read-path",
+      "description": "A project's repository identity is resolved off the read path and stored on its projection row, so a snapshot read never runs git. Issue #72.",
+      "keep": "RepositoryIdentityReactor.ts, its service, the 003 fork migration and GitWorkDepth.ts are ours whole, and ProjectionSnapshotQuery.ts must keep serving the stored repository_identity_json column instead of resolving an identity on the read path; take upstream for the rest of ProjectionSnapshotQuery.ts, then re-apply the stored-column reads on top.",
+      "files": [
+        "apps/server/src/orchestration/Layers/RepositoryIdentityReactor.ts",
+        "apps/server/src/orchestration/Services/RepositoryIdentityReactor.ts",
+        "apps/server/src/persistence/ForkMigrations/003_ProjectionProjectRepositoryIdentity.ts",
+        "apps/server/src/vcs/GitWorkDepth.ts",
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/ShellSnapshotSpawn.test.ts",
       "patchesUpstream": true
     },
     {

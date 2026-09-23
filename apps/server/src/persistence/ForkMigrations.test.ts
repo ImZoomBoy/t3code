@@ -42,6 +42,9 @@ const UPSTREAM_MIGRATIONS_FROM_38 = [
   { migration_id: 47, name: "ProjectionProjectIcon" },
   { migration_id: 48, name: "ProjectionThreadBranchPullRequest" },
   { migration_id: 49, name: "ProjectionThreadsActiveOrderKey" },
+  { migration_id: 50, name: "ProjectionThreadPullRequests" },
+  { migration_id: 51, name: "ProjectionThreadMessageContext" },
+  { migration_id: 52, name: "ProjectionThreadTitleState" },
 ];
 
 const EXPECTED_FORK_MIGRATIONS = [

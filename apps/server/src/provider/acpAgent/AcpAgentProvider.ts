@@ -74,7 +74,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
  * session. Long enough for an agent that starts a runtime first, short enough
  * that a wedged agent does not hold the settings panel open.
  */
-export const ACP_AGENT_PROBE_TIMEOUT_MS = 15_000;
+const ACP_AGENT_PROBE_TIMEOUT_MS = 15_000;
 
 /**
  * Empty on purpose. Model ids are opaque strings owned by the agent's own menu,

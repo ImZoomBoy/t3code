@@ -88,14 +88,12 @@ export const retireLegacyOrderingMigrationRow = Effect.fn("retireLegacyOrderingM
   },
 );
 
-export const forkMigrationEntries = [
+const forkMigrationEntries = [
   [3, "ProjectionProjectRepositoryIdentity", ForkMigration0003],
   [5, "ProjectionThreadsReadOnly", ForkMigration0005],
   [6, "DropTranscriptSequence", ForkMigration0006],
   [7, "ProjectionThreadsFleetOwned", ForkMigration0007],
 ] as const;
-
-export const forkMigrationManifest = forkMigrationEntries.map(([id, name]) => [id, name] as const);
 
 const makeForkMigrationLoader = () =>
   Migrator.fromRecord(

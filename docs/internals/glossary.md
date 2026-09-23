@@ -33,36 +33,42 @@ Terms whose meaning matters across T3 Code. Architecture and lifecycle constrain
 
 ## Providers and checkpoints
 
-| Term                | Meaning                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Provider            | The agent runtime T3 Code controls, such as Codex or Claude Code.                                                                                                                                                                                                                                                                                                    |
-| Driver              | The integration for a provider kind.                                                                                                                                                                                                                                                                                                                                 |
-| Provider instance   | One configured provider, with its own settings and lifecycle. Multiple instances can use the same driver.                                                                                                                                                                                                                                                            |
-| Adapter             | The boundary translating a provider's native protocol into T3 Code operations and events.                                                                                                                                                                                                                                                                            |
-| Session             | The provider runtime attached to a thread. A session can be stopped and resumed without deleting the thread.                                                                                                                                                                                                                                                         |
-| Runtime mode        | The thread's permission policy. See [permission modes](../user/permission-modes.md).                                                                                                                                                                                                                                                                                 |
-| Interaction mode    | How the agent approaches the task, such as planning. Separate from permission policy.                                                                                                                                                                                                                                                                                |
-| Checkpoint          | A saved workspace state used for diffs and restore, stored as a hidden Git ref.                                                                                                                                                                                                                                                                                      |
-| Checkpoint baseline | The workspace state captured before the work being compared.                                                                                                                                                                                                                                                                                                         |
-| Turn diff           | The workspace changes attributed to one turn.                                                                                                                                                                                                                                                                                                                        |
-| Turn environment    | Environment variables carried by one turn start, on top of the provider instance environment. Named per turn, not per environment in the whole-server sense above. It reaches a process only at spawn, so a turn whose environment the live session lacks restarts that session first. It is never persisted and never sent to any client: values name server paths. |
+| Term                | Meaning                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Provider            | The agent runtime T3 Code controls, such as Codex or Claude Code.                                            |
+| Driver              | The integration for a provider kind.                                                                         |
+| Provider instance   | One configured provider, with its own settings and lifecycle. Multiple instances can use the same driver.    |
+| Adapter             | The boundary translating a provider's native protocol into T3 Code operations and events.                    |
+| Session             | The provider runtime attached to a thread. A session can be stopped and resumed without deleting the thread. |
+| Runtime mode        | The thread's permission policy. See [permission modes](../user/permission-modes.md).                         |
+| Interaction mode    | How the agent approaches the task, such as planning. Separate from permission policy.                        |
+| Checkpoint          | A saved workspace state used for diffs and restore, stored as a hidden Git ref.                              |
+| Checkpoint baseline | The workspace state captured before the work being compared.                                                 |
+| Turn diff           | The workspace changes attributed to one turn.                                                                |
+
+## Pull requests
+
+| Term                 | Meaning                                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pull request link    | A persisted thread association identified by host, repository, and number. Links can cross projects within an environment and carry a server-maintained snapshot.                        |
+| Pull request sync    | The reactor that refreshes each distinct linked review once per cadence and discovers native stack layers. Explicit refreshes and failed stack reads trigger another read.               |
+| Current pull request | The link used by single-review controls and older clients. Open work takes precedence; a completed single chain points at its top layer. Unrelated terminal links use the latest update. |
+
+## Composer context
+
+| Term                 | Meaning                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Context record       | The typed payload behind a composer chip, keyed by `contextId` in `message.context.records`. It never holds bytes.                  |
+| Context reference    | One occurrence of a record in message text: `[label](t3-context://v1/<kind>/<contextId>)`. Several references can share one record. |
+| Attachment binding   | The link from an image or file record to its server-owned attachment. Its attachment ID can change without changing `contextId`.    |
+| Attachment inventory | The ordered image records shown as thumbnails above the prose, including images with no inline references.                          |
+
+See [composer context references](./composer-context-references.md) for the contract and lifecycle.
 
 ## Fork terms
 
-Terms this fork adds. See [worker threads](./acp-worker-threads.md) and
-[environment auth](./environment-auth.md).
+Terms this fork adds.
 
-| Term               | Meaning                                                                                                                                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| External ACP agent | An agent driven through the configurable `acpAgent` driver. Its command, arguments, environment, name and icon come from the instance's settings.                                                        |
-| Worker thread      | A read-only thread mirroring one peer session on a configured ACP agent's connection: work the agent started that this client did not.                                                                   |
-| Read-only thread   | A thread whose transcript is a window onto work driven elsewhere. `readOnly` is set once at creation and never cleared. `requireThreadPromptable` refuses turns and reverts on it.                       |
-| Fleet-owned thread | A read-only thread the First Mate daemon created for itself. `fleetOwned` is set once at creation from the issuer the dispatch entry point stamped.                                                      |
-| Fleet subject      | The session `subject` the First Mate daemon mints its bearer under, `"firstmate"`. It is the read-only exception: the fleet may prompt a read-only thread only when the thread is also fleet-owned.      |
-| Skill invocability | Who may start a skill. `userInvocable: false` leaves a skill out of the composer picker and the provider's `/` command list. `userInvocationOnly: true` keeps the row and carries a **Manual** label.    |
-| Skill scope        | Where a skill came from, as the provider spells it. Discovery answers for one `cwd`, so a thread sees its own project's skills plus the user's.                                                          |
-| Git work depth     | The process-wide permit count every `git` the environment runs for itself must take. See the [overview](./overview.md#git-work-depth).                                                                   |
-| Connection span    | One client websocket, end to end, as a trace span. The client puts its span's `traceparent` on the connect URL, so both ends of one drop share a trace id.                                               |
-| Round              | One pass of a host poll: one process-table snapshot or one listener scan, with every answer derived from it. See [terminal runtime](./terminal-runtime.md).                                              |
-| Back-off poll      | The shared timer behind the terminal subprocess check and the preview port scanner. A round that changes nothing multiplies the next gap; any event resets it to the base period.                        |
-| Update pill label  | The short version label the sidebar update pill shows while a downloaded update waits, for example `v0.0.41 ready`. `getForkUpdatePillLabel` owns the words. One label, never a modal and never a toast. |
+| Term              | Meaning                                                                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Update pill label | The short version label the sidebar update pill shows while a downloaded update waits, for example `v0.0.41 ready`. `getForkUpdatePillLabel` owns the words. One label, never a modal and never a toast. |

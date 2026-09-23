@@ -58,6 +58,7 @@ import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLive
 import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 
 /** Resolved from this file, not the working directory, so the runner's cwd cannot move it. */
 const DATABASE_PATH = NodeURL.fileURLToPath(
@@ -102,11 +103,12 @@ const settleLoop = Effect.promise(async () => {
 });
 
 // Migrations run against the copy, so a snapshot taken before a schema change
-// still works. `RepositoryIdentityResolver` is deliberately absent: since #72
-// the shell read serves repository identity from a column and spawns nothing.
+// still works. The shell read resolves repository identity through
+// `RepositoryIdentityResolver`, so the real resolver is part of what is measured.
 const shellSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
   Layer.provide(ThreadBackgroundLiveness.layer),
   Layer.provide(ThreadPlanProgress.layer),
+  Layer.provide(RepositoryIdentityResolver.layer),
   Layer.provideMerge(makeSqlitePersistenceLive(DATABASE_PATH)),
   Layer.provideMerge(NodeServices.layer),
 );

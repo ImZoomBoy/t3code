@@ -8,7 +8,6 @@ import * as NodeSqlite from "node:sqlite";
 import * as NodePerfHooks from "node:perf_hooks";
 
 import * as Cache from "effect/Cache";
-import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -162,10 +161,6 @@ const recordPermitStatement = (startedAt: number): void => {
   hold.statements += 1;
 };
 
-export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
-
-export type TypeId = "~local/sqlite-node/SqliteClient";
-
 export interface SqliteClientConfig {
   readonly filename: string;
   readonly readonly?: boolean | undefined;
@@ -182,7 +177,7 @@ export interface SqliteMemoryClientConfig extends Omit<
   "filename" | "readonly"
 > {}
 
-export class UnsupportedNodeSqliteVersionError extends Schema.TaggedErrorClass<UnsupportedNodeSqliteVersionError>()(
+export class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<UnsupportedNodeSqliteVersionError>()(
   "UnsupportedNodeSqliteVersionError",
   {
     nodeVersion: Schema.String,
@@ -194,7 +189,7 @@ export class UnsupportedNodeSqliteVersionError extends Schema.TaggedErrorClass<U
   }
 }
 
-export class UnsupportedNodeSqliteOperationError extends Schema.TaggedErrorClass<UnsupportedNodeSqliteOperationError>()(
+export class UnsupportedNodeSqliteOperationError extends Schema.TaggedError<UnsupportedNodeSqliteOperationError>()(
   "UnsupportedNodeSqliteOperationError",
   {},
 ) {
@@ -469,13 +464,6 @@ const makeMemory = (
       });
       return database;
     },
-  );
-
-export const layerConfig = (
-  config: Config.Wrap<SqliteClientConfig>,
-): Layer.Layer<Client.SqlClient, Config.ConfigError | SqlError> =>
-  Layer.effect(Client.SqlClient, Config.unwrap(config).pipe(Effect.flatMap(make))).pipe(
-    Layer.provide(Reactivity.layer),
   );
 
 export const layer = (config: SqliteClientConfig): Layer.Layer<Client.SqlClient, SqlError> =>

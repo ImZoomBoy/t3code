@@ -1,7 +1,4 @@
-import type {
-  OrchestrationShellSnapshot,
-  PreviewAutomationUnavailableError,
-} from "@t3tools/contracts";
+import type { McpCapabilityUnavailableError, OrchestrationShellSnapshot } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -28,7 +25,7 @@ const summarize = (snapshot: OrchestrationShellSnapshot): ReadonlyArray<FleetThr
  */
 export const whoami = Effect.fn("FleetToolkit.whoami")(function* (): Effect.fn.Return<
   FleetThreadIdentity,
-  PreviewAutomationUnavailableError,
+  McpCapabilityUnavailableError,
   McpInvocationContext.McpInvocationContext
 > {
   const scope = yield* McpInvocationContext.requireMcpCapability("fleet");
@@ -41,7 +38,7 @@ export const whoami = Effect.fn("FleetToolkit.whoami")(function* (): Effect.fn.R
  */
 export const listThreads = Effect.fn("FleetToolkit.listThreads")(function* (): Effect.fn.Return<
   { readonly threads: ReadonlyArray<FleetThreadSummary> },
-  PreviewAutomationUnavailableError,
+  McpCapabilityUnavailableError,
   McpInvocationContext.McpInvocationContext | ProjectionSnapshotQuery.ProjectionSnapshotQuery
 > {
   yield* McpInvocationContext.requireMcpCapability("fleet");

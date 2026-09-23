@@ -43,10 +43,10 @@ export class GitWorkDepth extends Context.Service<
 >()("t3/vcs/GitWorkDepth") {}
 
 /** Environment variable that overrides the derived default. */
-export const GIT_WORK_DEPTH_ENV_VAR = "T3CODE_GIT_WORK_DEPTH";
+const GIT_WORK_DEPTH_ENV_VAR = "T3CODE_GIT_WORK_DEPTH";
 
 /** An override outside this range is clamped into it; one permit is the floor. */
-export const MIN_GIT_WORK_DEPTH = 1;
+const MIN_GIT_WORK_DEPTH = 1;
 export const MAX_GIT_WORK_DEPTH = 64;
 
 const DEFAULT_MIN_GIT_WORK_DEPTH = 4;
@@ -88,7 +88,11 @@ export const makeWith = (depth: number) => Effect.sync(() => makeUnsafe(depth));
 
 let processGate: GitWorkDepth["Service"] | undefined;
 
-/** The one gate this process shares, created on first use. */
+/**
+ * The one gate this process shares, created on first use.
+ *
+ * @public Service construction is part of the canonical Effect module API.
+ */
 export const make = Effect.sync(() => {
   processGate ??= makeUnsafe(
     resolveGitWorkDepth({ override: process.env[GIT_WORK_DEPTH_ENV_VAR] }),

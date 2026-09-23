@@ -53,7 +53,8 @@ describe("DesktopEnvironment", () => {
           T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
           T3CODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
           T3CODE_OTLP_EXPORT_INTERVAL_MS: "2500",
-          T3CODE_TRACE_MIN_DURATION_MS: "5",
+          T3CODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=t3",
+          T3CODE_OTLP_PROTOCOL: "http/protobuf",
         },
       );
 
@@ -78,6 +79,7 @@ describe("DesktopEnvironment", () => {
       // The fork's own app user model id. See DesktopEnvironment.ts and #59.
       assert.equal(environment.appUserModelId, "com.autoprintworks.t3code.dev");
       assert.equal(environment.linuxWmClass, "t3code-fork-dev");
+      assert.equal(environment.linuxDesktopEntryName, "t3code-fork-dev.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -87,7 +89,14 @@ describe("DesktopEnvironment", () => {
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
       assert.equal(environment.otlpExportIntervalMs, 2500);
-      assert.equal(environment.traceMinDurationMs, 5);
+      assert.deepEqual(
+        environment.otlpHeaders,
+        Option.some({
+          authorization: "Basic abc==",
+          "x-tenant": "t3",
+        }),
+      );
+      assert.equal(environment.otlpProtocol, "http/protobuf");
     }),
   );
 
@@ -105,6 +114,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      assert.equal(environment.otlpProtocol, "http/json");
     }),
   );
 
@@ -123,6 +133,23 @@ describe("DesktopEnvironment", () => {
         environment.backendEntryPath,
         "/install/resources/server.asar/apps/server/dist/bin.mjs",
       );
+      assert.equal(
+        environment.clientAssetsDir,
+        "/install/resources/server.asar/apps/server/dist/client",
+      );
+    }),
+  );
+
+  it.effect("uses the stable desktop entry as the packaged Linux portal identity", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "linux",
+        isPackaged: true,
+        appPath: "/tmp/.mount_t3code/resources/app.asar",
+        resourcesPath: "/tmp/.mount_t3code/resources",
+      });
+
+      assert.equal(environment.linuxDesktopEntryName, "t3code-fork.desktop");
     }),
   );
 

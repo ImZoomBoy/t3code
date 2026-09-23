@@ -77,6 +77,7 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
             getUserInputActivity: () => Effect.die("unused"),
+            listActivitiesByKind: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -89,6 +90,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
             getEventReplayStats: () => Effect.die("unused"),
             getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getProjectShells: () => Effect.die("unused"),
             getProjectShellById: () => Effect.succeed(Option.none()),
             getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
             getImportedAgentSessionSources: () => Effect.die("unused"),
@@ -194,6 +196,7 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
             getUserInputActivity: () => Effect.die("unused"),
+            listActivitiesByKind: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -206,6 +209,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
             getEventReplayStats: () => Effect.die("unused"),
             getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getProjectShells: () => Effect.die("unused"),
             getProjectShellById: () => Effect.succeed(Option.none()),
             getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
             getImportedAgentSessionSources: () => Effect.die("unused"),
@@ -286,6 +290,7 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
             getUserInputActivity: () => Effect.die("unused"),
+            listActivitiesByKind: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -298,6 +303,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
             getEventReplayStats: () => Effect.die("unused"),
             getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getProjectShells: () => Effect.die("unused"),
             getProjectShellById: () => Effect.succeed(Option.none()),
             getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
             getImportedAgentSessionSources: () => Effect.die("unused"),
@@ -363,6 +369,7 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
             getUserInputActivity: () => Effect.die("unused"),
+            listActivitiesByKind: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -375,6 +382,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
             getEventReplayStats: () => Effect.die("unused"),
             getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getProjectShells: () => Effect.die("unused"),
             getProjectShellById: () => Effect.succeed(Option.none()),
             getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
             getImportedAgentSessionSources: () => Effect.die("unused"),
@@ -425,6 +433,7 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
             getUserInputActivity: () => Effect.die("unused"),
+            listActivitiesByKind: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -437,6 +446,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
             getEventReplayStats: () => Effect.die("unused"),
             getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getProjectShells: () => Effect.die("unused"),
             getProjectShellById: () => Effect.succeed(Option.none()),
             getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
             getImportedAgentSessionSources: () => Effect.die("unused"),

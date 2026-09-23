@@ -75,7 +75,7 @@ const subjectFlag = Flag.string("subject").pipe(
   Flag.optional,
 );
 
-export class FleetSubjectScopeError extends Schema.TaggedErrorClass<FleetSubjectScopeError>()(
+export class FleetSubjectScopeError extends Schema.TaggedError<FleetSubjectScopeError>()(
   "FleetSubjectScopeError",
   { requested: Schema.String },
 ) {

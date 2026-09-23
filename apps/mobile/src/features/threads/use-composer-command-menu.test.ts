@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
+vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
 // `../../state/queries` pulls in the connection runtime, and through it the
 // Expo native modules, which the test transform cannot load. The hook under
 // test only needs the path search, so stub the module at its boundary.
 vi.mock("../../state/queries", () => ({
   useComposerPathSearch: () => ({ entries: [], isPending: false }),
+  useComposerPullRequestSearch: () => ({ entries: [], isPending: false, error: null }),
 }));
+vi.mock("../../state/use-composer-drafts", () => ({
+  getComposerDraftSnapshot: vi.fn(),
+  setComposerDraftContext: vi.fn(),
+}));
+vi.mock("../../lib/uuid", () => ({ uuidv4: () => "context-id" }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: { refreshProviders: Symbol("refreshProviders") },
 }));
