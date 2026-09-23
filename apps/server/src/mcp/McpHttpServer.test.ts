@@ -828,6 +828,7 @@ const FleetTestLayer = McpHttpServer.FleetToolkitRegistrationLive.pipe(
       getCommandReadModel: () => Effect.die("unused"),
       getSnapshot: () => Effect.die("unused"),
       getShellSnapshot: () => Effect.succeed(makeShellSnapshot([makeThreadShell("live", null)])),
+      getDeletedWorktreeThreads: () => Effect.die("unused"),
       getArchivedShellSnapshot: () =>
         Effect.succeed(
           makeShellSnapshot([makeThreadShell("archived", "2026-01-03T00:00:00.000Z")]),

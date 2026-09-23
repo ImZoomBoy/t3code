@@ -12,7 +12,7 @@ import {
   watchSqlPermits,
 } from "./SqlPermitIntegrity.ts";
 
-const layer = it.layer(SqliteClient.layerMemory());
+const layer = it.layer(SqliteClient.layer({ filename: ":memory:" }));
 
 /**
  * A transaction body that yields. This is what the budget exists to catch: the

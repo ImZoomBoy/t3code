@@ -114,6 +114,7 @@ describe("VcsProcess.run", () => {
                 attempts += 1;
               }).pipe(Effect.andThen(Effect.fail(failure))),
           }),
+          Effect.provide(GitWorkDepth.layer),
         );
         const error = yield* service
           .run({
@@ -196,6 +197,7 @@ describe("VcsProcess.run", () => {
                 };
               }),
           }),
+          Effect.provide(GitWorkDepth.layer),
         );
         const fiber = yield* service
           .run({

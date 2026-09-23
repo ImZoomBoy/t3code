@@ -73,6 +73,18 @@ export interface ProjectionProjectRepositoryShape {
   readonly getById: (
     input: GetProjectionProjectInput,
   ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
+
+  /**
+   * List every projected project row, in deterministic creation order.
+   *
+   * The repository identity reactor sweeps these rows on start to find projects
+   * whose stored identity no longer belongs to their workspace root, so it needs
+   * the raw rows rather than a snapshot: the identity columns are not on one.
+   */
+  readonly listAll: () => Effect.Effect<
+    ReadonlyArray<ProjectionProject>,
+    ProjectionRepositoryError
+  >;
 }
 
 /**

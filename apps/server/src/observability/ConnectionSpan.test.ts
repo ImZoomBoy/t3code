@@ -29,39 +29,58 @@ const connectionSpan = (spans: ReadonlyArray<Tracer.NativeSpan>) =>
   spans.find((span) => span.name === ConnectionSpan.CLIENT_SOCKET_SPAN_NAME);
 
 /**
- * A socket whose run stays open until the test ends it, standing in for the platform websocket the
- * RPC server would otherwise be handed.
+ * A socket whose reader stays open until the test ends it, standing in for the platform websocket
+ * the RPC server would otherwise be handed. `pull` parks until a frame arrives or the connection
+ * fails, which is the contract a real socket reader keeps.
  */
 const makeFakeSocket = Effect.fnUntraced(function* () {
-  const finished = yield* Deferred.make<void, Socket.SocketError>();
+  const failed = yield* Deferred.make<never, Socket.SocketError>();
   const written: Array<Uint8Array | string | Socket.CloseEvent> = [];
-  let handler: ((data: string | Uint8Array) => unknown) | undefined;
+  const inbound: Array<string | Uint8Array> = [];
+  let arrived = yield* Deferred.make<void>();
+
+  const pull = Effect.gen(function* () {
+    while (inbound.length === 0) {
+      yield* Effect.raceFirst(Deferred.await(failed), Deferred.await(arrived));
+      arrived = yield* Deferred.make<void>();
+    }
+    return inbound.splice(0, inbound.length) as unknown as readonly [
+      string | Uint8Array,
+      ...Array<string | Uint8Array>,
+    ];
+  });
 
   const socket = Socket.make({
-    runRaw: (incoming) =>
-      Effect.suspend(() => {
-        handler = incoming as (data: string | Uint8Array) => unknown;
-        return Deferred.await(finished);
-      }),
-    writer: Effect.succeed((chunk: Uint8Array | string | Socket.CloseEvent) =>
-      Effect.sync(() => {
-        written.push(chunk);
-      }),
-    ),
+    reader: Effect.succeed({ pull, upgrade: () => Effect.void }),
+    writer: Effect.succeed({
+      write: (chunk: Uint8Array | string | Socket.CloseEvent) =>
+        Effect.sync(() => {
+          written.push(chunk);
+        }),
+      writeAll: (chunks: readonly [Uint8Array | string, ...Array<Uint8Array | string>]) =>
+        Effect.sync(() => {
+          written.push(...chunks);
+        }),
+    }),
   });
 
   return {
     socket,
     written,
-    receive: (data: string) => {
-      if (handler === undefined) {
-        throw new Error("Expected the instrumented socket to be running.");
-      }
-      handler(data);
-    },
+    // Returns once the reader has taken the frame, so the test controls the order of
+    // arrivals and clock moves exactly.
+    receive: (data: string) =>
+      Effect.gen(function* () {
+        inbound.push(data);
+        yield* Deferred.succeed(arrived, undefined);
+        while (inbound.length > 0) {
+          yield* Effect.yieldNow;
+        }
+        yield* Effect.yieldNow;
+      }),
     closeWith: (code: number, closeReason?: string) =>
       Deferred.failSync(
-        finished,
+        failed,
         () =>
           new Socket.SocketError({
             reason: new Socket.SocketCloseError(
@@ -69,19 +88,27 @@ const makeFakeSocket = Effect.fnUntraced(function* () {
             ),
           }),
       ),
-    endCleanly: () => Deferred.succeed(finished, undefined),
   };
 });
 
-/** Runs the instrumented socket, hands the test a writer, and returns once the run has started. */
+/** Reads the instrumented socket, hands the test a writer, and returns once the read has started. */
 const startSocket = Effect.fnUntraced(function* (fake: { readonly socket: Socket.Socket }) {
   const instrumented = yield* ConnectionSpan.instrumentClientSocket(fake.socket, {
     attributes: { "connection.session.id": "session-1" },
   });
-  const write = yield* instrumented.writer;
-  const fiber = yield* Effect.forkChild(Effect.exit(instrumented.runRaw(() => {})));
+  const writer = yield* instrumented.writer;
+  const fiber = yield* Effect.forkChild(
+    Effect.exit(
+      Effect.gen(function* () {
+        const reader = yield* instrumented.reader;
+        while (true) {
+          yield* reader.pull;
+        }
+      }).pipe(Effect.scoped),
+    ),
+  );
   yield* Effect.yieldNow;
-  return { fiber, write };
+  return { fiber, write: writer.write };
 });
 
 describe("instrumentClientSocket", () => {
@@ -91,10 +118,10 @@ describe("instrumentClientSocket", () => {
       const fake = yield* makeFakeSocket();
       const { fiber, write } = yield* startSocket(fake);
 
-      fake.receive(PING_FRAME);
+      yield* fake.receive(PING_FRAME);
       yield* write(PONG_FRAME);
       yield* TestClock.adjust("5 seconds");
-      fake.receive(PING_FRAME);
+      yield* fake.receive(PING_FRAME);
       yield* write(PONG_FRAME);
 
       yield* fake.closeWith(1000, "going away");
@@ -154,13 +181,13 @@ describe("instrumentClientSocket", () => {
       const fake = yield* makeFakeSocket();
       const { fiber, write } = yield* startSocket(fake);
 
-      fake.receive(PING_FRAME);
+      yield* fake.receive(PING_FRAME);
       yield* write(PONG_FRAME);
 
       // The client stops pinging for far longer than its 5-second interval, which is what a
       // client-side missed pong looks like from this end.
       yield* TestClock.adjust("25 seconds");
-      fake.receive(PING_FRAME);
+      yield* fake.receive(PING_FRAME);
       yield* TestClock.adjust("25 seconds");
 
       yield* fake.closeWith(1006);
@@ -191,12 +218,12 @@ describe("instrumentClientSocket", () => {
       const { fiber, write } = yield* startSocket(fake);
 
       yield* write(new Socket.CloseEvent(1001, "server shutting down"));
-      yield* fake.endCleanly();
-      yield* Fiber.join(fiber);
+      yield* Fiber.interrupt(fiber);
 
       const span = connectionSpan(spans);
       expect(span?.attributes.get("connection.close.initiator")).toBe("server");
-      // The run completed rather than failing, so there is no close error to read a code from.
+      // The read was interrupted rather than failing, so there is no close error to read a
+      // code from.
       expect(span?.attributes.get("connection.close.observed")).toBe(false);
       expect(span?.attributes.get("connection.close.clean")).toBe(true);
     }).pipe(

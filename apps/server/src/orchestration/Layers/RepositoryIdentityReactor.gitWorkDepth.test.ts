@@ -169,7 +169,6 @@ const makeHarness = (input: {
       upsert: () => Effect.die("unused"),
       getById: () => Effect.succeed(Option.none()),
       listAll: () => Effect.succeed(input.projects),
-      deleteById: () => Effect.die("unused"),
     });
 
     const layer = Layer.mergeAll(

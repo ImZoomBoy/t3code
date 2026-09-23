@@ -8,7 +8,10 @@ import * as Tracer from "effect/Tracer";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
-import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import {
+  DEFAULT_SIGNAL_EXPORT,
+  DEFAULT_TRACE_MIN_DURATION_MS,
+} from "@t3tools/shared/observability";
 
 import * as ServerConfig from "./config.ts";
 import { ServerLoggerLive } from "./serverLogger.ts";
@@ -48,6 +51,7 @@ const configLayer = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =
         traceMinLevel: "Info",
         traceTimingEnabled: false,
         traceBatchWindowMs: 200,
+        traceMinDurationMs: DEFAULT_TRACE_MIN_DURATION_MS,
         traceMaxBytes: 1024,
         traceMaxFiles: 1,
         otlpTracesUrl: undefined,
