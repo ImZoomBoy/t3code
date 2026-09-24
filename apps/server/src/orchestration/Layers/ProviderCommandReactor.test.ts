@@ -3230,6 +3230,7 @@ describe("ProviderCommandReactor", () => {
     readonly harness: Awaited<ReturnType<typeof createHarness>>;
     readonly ordinal: number;
     readonly environment?: ProviderInstanceEnvironment;
+    readonly whenBusy?: "queue";
   }) =>
     input.harness.engine.dispatch({
       type: "thread.turn.start",
@@ -3245,6 +3246,7 @@ describe("ProviderCommandReactor", () => {
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       runtimeMode: "approval-required",
       ...(input.environment !== undefined ? { environment: input.environment } : {}),
+      ...(input.whenBusy !== undefined ? { whenBusy: input.whenBusy } : {}),
       createdAt: "2026-01-01T00:00:00.000Z",
     });
 
@@ -3343,6 +3345,135 @@ describe("ProviderCommandReactor", () => {
       });
       // `sendTurn` has no way to carry an environment.
       expect(harness.sendTurn.mock.calls[1]?.[0]).not.toHaveProperty("environment");
+    }),
+  );
+
+  /** Marks thread-1's turn as running, or as over, the way provider events do. */
+  const setThreadTurnRunning = (input: {
+    readonly harness: Awaited<ReturnType<typeof createHarness>>;
+    readonly running: boolean;
+  }) =>
+    input.harness.engine.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make(`cmd-thread-turn-running-${input.running}`),
+      threadId: ThreadId.make("thread-1"),
+      session: {
+        threadId: ThreadId.make("thread-1"),
+        status: input.running ? "running" : "ready",
+        providerName: "codex",
+        providerInstanceId: TURN_ENVIRONMENT_MODEL_SELECTION.instanceId,
+        runtimeMode: "approval-required",
+        activeTurnId: input.running ? asTurnId("turn-busy") : null,
+        lastError: null,
+        updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+      },
+      createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
+    });
+
+  /**
+   * The supervisor's wake carries an environment and asks to wait for a busy
+   * thread. The server defers it, and when the running turn ends the session
+   * spawned for it gets the environment, as a direct start's session does.
+   */
+  effectIt.effect("a deferred turn start spawns its session with its environment", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const turnEnvironment = decodeProviderEnvironment([
+        { name: "FM_UNIT", value: "unit-11" },
+        { name: "PATH", value: TURN_ENVIRONMENT_TOOL_DIR },
+      ]);
+
+      // A turn runs with no provider process live for this reactor, so the
+      // deferred turn start has to spawn one when it runs.
+      yield* setThreadTurnRunning({ harness, running: true });
+      yield* dispatchTurn({ harness, ordinal: 1, environment: turnEnvironment, whenBusy: "queue" });
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.startSession).not.toHaveBeenCalled();
+
+      yield* setThreadTurnRunning({ harness, running: false });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        environment: turnEnvironment,
+      });
+
+      // Neither the read model nor the persisted events carry the value.
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - Scans the whole read model for a value no client may see.
+      expect(JSON.stringify(readModel)).not.toContain(TURN_ENVIRONMENT_TOOL_DIR);
+      const events = Array.from(yield* Stream.runCollect(harness.engine.readEvents(0)));
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - Scans every persisted event for a value none may carry.
+      expect(JSON.stringify(events)).not.toContain(TURN_ENVIRONMENT_TOOL_DIR);
+      expect(
+        events
+          .filter((event) => event.commandId === "cmd-turn-live-session-1")
+          .map((event) => event.type),
+      ).toEqual([
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+    }),
+  );
+
+  /**
+   * The live session was spawned by the person's turn, without the wake's
+   * environment. The deferred wake restarts it with the environment when it runs,
+   * as a direct start with an environment would.
+   */
+  effectIt.effect("a deferred turn start restarts a live session for its environment", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const turnEnvironment = decodeProviderEnvironment([
+        { name: "FM_UNIT", value: "unit-12" },
+        { name: "PATH", value: TURN_ENVIRONMENT_TOOL_DIR },
+      ]);
+
+      yield* dispatchTurn({ harness, ordinal: 1 });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.startSession.mock.calls[0]?.[1]).not.toHaveProperty("environment");
+
+      yield* setThreadTurnRunning({ harness, running: true });
+      yield* dispatchTurn({ harness, ordinal: 2, environment: turnEnvironment, whenBusy: "queue" });
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+
+      yield* setThreadTurnRunning({ harness, running: false });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 2));
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        environment: turnEnvironment,
+        resumeCursor: { opaque: "resume-1" },
+      });
+    }),
+  );
+
+  /**
+   * A wake that asks to wait but finds the thread idle runs at once. Its
+   * environment goes the way a direct start's does.
+   */
+  effectIt.effect("a turn start that asks to wait applies its environment on an idle thread", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const turnEnvironment = decodeProviderEnvironment([
+        { name: "FM_UNIT", value: "unit-13" },
+        { name: "PATH", value: TURN_ENVIRONMENT_TOOL_DIR },
+      ]);
+
+      yield* dispatchTurn({ harness, ordinal: 1, environment: turnEnvironment, whenBusy: "queue" });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        environment: turnEnvironment,
+      });
+      const events = Array.from(yield* Stream.runCollect(harness.engine.readEvents(0)));
+      expect(
+        events
+          .filter((event) => event.commandId === "cmd-turn-live-session-1")
+          .map((event) => event.type),
+      ).toEqual(["thread.message-sent", "thread.turn-start-requested"]);
     }),
   );
 

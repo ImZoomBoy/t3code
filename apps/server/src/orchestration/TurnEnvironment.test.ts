@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema";
 
 import { decideOrchestrationCommand } from "./decider.ts";
 import {
-  rememberTurnEnvironment,
+  makeDeferredTurnEnvironments,
   sameTurnEnvironment,
   takeTurnEnvironment,
 } from "./TurnEnvironment.ts";
@@ -87,6 +87,11 @@ function makeTurnStart(commandId: string, withEnvironment: boolean): Orchestrati
 // The register is bounded, so a turn start whose environment nobody takes
 // costs one entry rather than growing for the life of the process.
 const MAX_PARKED_TURN_ENVIRONMENTS = 256;
+
+// A turn start that ran at once, reported the way the engine reports it.
+const turnEnvironments = makeDeferredTurnEnvironments();
+const rememberTurnEnvironment = (command: OrchestrationCommand) =>
+  turnEnvironments.remember(command, []);
 
 describe("turn environment side channel", () => {
   it.effect("hands a parked environment to the one command that carried it", () =>

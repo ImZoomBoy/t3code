@@ -180,6 +180,41 @@
       ],
       "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy-environment",
+      "description": "A deferred turn start (whenBusy: \"queue\") can carry an environment. The engine keeps it in memory, never on an event or in the deferred-turn-start table, and hands it to the provider reactor when the deferred turn start runs, so the session spawned or restarted for it gets it, as for a direct start. The deferred turn start records only hasEnvironment. After a restart the environment is gone, so the decider drops it with the environment-lost reason instead of running it without it. The decider asks the engine through DeciderContext, a signed-off exception to pure orchestration. The server advertises turnStartWhenBusyEnvironment in its environment capabilities.",
+      "keep": "TurnEnvironment.ts, DeciderContext.ts and deferredTurnStarts.ts are ours whole, including makeDeferredTurnEnvironments and the environment-lost drop in releaseDeferredTurnStart. The hasEnvironment field and the environment-lost drop reason survive in orchestration.ts; the turnStartWhenBusyEnvironment capability survives in environment.ts and ServerEnvironment.ts; and the deferredTurnEnvironments instance, the DeciderContext it provides around decideOrchestrationCommand and its remember call after the commit survive in OrchestrationEngine.ts. Everything else in those files takes upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/environment.ts",
+        "apps/server/src/environment/ServerEnvironment.ts",
+        "apps/server/src/orchestration/TurnEnvironment.ts",
+        "apps/server/src/orchestration/DeciderContext.ts",
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts",
+      "testName": "defers a turn start that carries an environment and starts it when free|after a restart, drops a deferred turn start whose environment died with the process|does not defer a turn start that carries an environment without whenBusy",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy-environment-reactor-tests",
+      "description": "The provider reactor tests for fm-turn-start-when-busy-environment: a deferred turn start spawns or restarts its session with its environment, and one on an idle thread applies it like a direct start. The manifest takes one test file per entry, so these tests have their own entry.",
+      "keep": "The three tests named in testName, the setThreadTurnRunning helper and the whenBusy option of dispatchTurn survive in ProviderCommandReactor.test.ts. Everything else in that file takes upstream.",
+      "files": ["apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts"],
+      "test": "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts",
+      "testName": "a deferred turn start spawns its session with its environment|a deferred turn start restarts a live session for its environment|a turn start that asks to wait applies its environment on an idle thread",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy-environment-restart-test",
+      "description": "The startup test for fm-turn-start-when-busy-environment: after a real restart a deferred turn start with an environment is dropped with environment-lost and the one behind it runs. The manifest takes one test file per entry, so this test has its own entry.",
+      "keep": "The test named in testName and the decodeProviderEnvironment helper survive in orphanedProviderSessionStartup.integration.test.ts. Everything else in that file takes upstream.",
+      "files": ["apps/server/integration/orphanedProviderSessionStartup.integration.test.ts"],
+      "test": "apps/server/integration/orphanedProviderSessionStartup.integration.test.ts",
+      "testName": "drops a deferred turn start whose environment a restart lost",
+      "patchesUpstream": true
     }
   ]
 }

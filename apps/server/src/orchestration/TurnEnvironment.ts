@@ -8,11 +8,15 @@
  * takes it when it handles that command's `thread.turn-start-requested`.
  * Taking removes it, so a later turn on the same thread never inherits it.
  *
+ * A deferred turn start's environment waits with the engine instead, until
+ * the start runs or is dropped. See `makeDeferredTurnEnvironments`.
+ *
  * @module TurnEnvironment
  */
 import type {
   CommandId,
   OrchestrationCommand,
+  OrchestrationEvent,
   ProviderInstanceEnvironment,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -24,10 +28,17 @@ const MAX_PARKED_TURN_ENVIRONMENTS = 256;
 
 const environmentsByCommandId = new Map<CommandId, ProviderInstanceEnvironment>();
 
-export const rememberTurnEnvironment = Effect.fnUntraced(function* (command: OrchestrationCommand) {
+const rememberTurnEnvironment = Effect.fnUntraced(function* (command: OrchestrationCommand) {
   if (command.type !== "thread.turn.start" || command.environment === undefined) {
     return;
   }
+  yield* parkTurnEnvironment(command.commandId, command.environment);
+});
+
+const parkTurnEnvironment = Effect.fnUntraced(function* (
+  commandId: CommandId,
+  environment: ProviderInstanceEnvironment,
+) {
   if (environmentsByCommandId.size >= MAX_PARKED_TURN_ENVIRONMENTS) {
     const oldest = environmentsByCommandId.keys().next();
     if (!oldest.done) {
@@ -40,8 +51,51 @@ export const rememberTurnEnvironment = Effect.fnUntraced(function* (command: Orc
       });
     }
   }
-  environmentsByCommandId.set(command.commandId, command.environment);
+  environmentsByCommandId.set(commandId, environment);
 });
+
+/**
+ * The environments of deferred turn starts, owned by one engine. They live
+ * exactly as long as that engine, so after a restart `has` is false and the
+ * decider drops the start with `environment-lost`.
+ *
+ * No cap: every entry is removed by the event that runs or drops its start.
+ */
+export function makeDeferredTurnEnvironments() {
+  const deferred = new Map<CommandId, ProviderInstanceEnvironment>();
+  return {
+    has: (commandId: CommandId): boolean => deferred.has(commandId),
+    /**
+     * Call once per committed command, with the events it wrote, before they
+     * are published, so the provider reactor finds every environment it needs.
+     */
+    remember: Effect.fnUntraced(function* (
+      command: OrchestrationCommand,
+      committedEvents: ReadonlyArray<OrchestrationEvent>,
+    ) {
+      for (const event of committedEvents) {
+        if (event.commandId === null) continue;
+        if (event.type === "thread.turn-start-requested") {
+          const environment = deferred.get(event.commandId);
+          if (environment === undefined) continue;
+          deferred.delete(event.commandId);
+          yield* parkTurnEnvironment(event.commandId, environment);
+        } else if (event.type === "thread.deferred-turn-start-dropped") {
+          deferred.delete(event.commandId);
+        }
+      }
+      if (
+        command.type === "thread.turn.start" &&
+        command.environment !== undefined &&
+        committedEvents.some((event) => event.type === "thread.turn-start-deferred")
+      ) {
+        deferred.set(command.commandId, command.environment);
+        return;
+      }
+      yield* rememberTurnEnvironment(command);
+    }),
+  };
+}
 
 export function takeTurnEnvironment(
   commandId: CommandId | null,
