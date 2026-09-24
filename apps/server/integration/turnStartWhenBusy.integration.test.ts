@@ -79,10 +79,15 @@ const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
     });
   });
 
-/** A turn that answers `reply`, dated when the adapter runs it. */
+/**
+ * A turn that answers `reply`, dated when the adapter runs it. `failed` ends it
+ * as a failed turn; `runtimeError` raises a runtime error without a turn id
+ * while it runs.
+ */
 const turnResponse = (
   reply: string,
   holdCompletion?: Deferred.Deferred<void>,
+  options?: { readonly failed?: boolean; readonly runtimeError?: boolean },
 ): TestTurnResponse => ({
   get events() {
     const at = liveNow();
@@ -90,11 +95,23 @@ const turnResponse = (
     return [
       { ...base, type: "turn.started", eventId: EventId.make(`${reply}-started`) },
       { ...base, type: "message.delta", eventId: EventId.make(`${reply}-delta`), delta: reply },
+      ...(options?.runtimeError === true
+        ? [
+            {
+              provider: PROVIDER,
+              createdAt: at,
+              threadId: THREAD_ID,
+              type: "runtime.error",
+              eventId: EventId.make(`${reply}-runtime-error`),
+              payload: { message: "provider stderr" },
+            },
+          ]
+        : []),
       {
         ...base,
         type: "turn.completed",
         eventId: EventId.make(`${reply}-completed`),
-        status: "completed",
+        status: options?.failed === true ? "failed" : "completed",
       },
     ];
   },
@@ -143,7 +160,7 @@ const watchEvents = (
   });
 
 const isSessionStatus =
-  (status: "running" | "ready") =>
+  (status: "running" | "ready" | "error") =>
   (event: OrchestrationEvent): boolean =>
     event.type === "thread.session-set" &&
     event.payload.threadId === THREAD_ID &&
@@ -333,6 +350,120 @@ it.live("a turn start that asks to queue runs at once on an idle thread", () =>
       yield* Fiber.join(idle);
     }),
   ),
+);
+
+/** Records the session as stopped with no turn, as a restart or the idle reaper leaves it. */
+const setStoppedSession = (harness: OrchestrationIntegrationHarness) =>
+  Effect.gen(function* () {
+    const at = liveNow();
+    yield* harness.engine.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-session-stopped"),
+      threadId: THREAD_ID,
+      session: {
+        threadId: THREAD_ID,
+        status: "stopped",
+        providerName: PROVIDER,
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: at,
+      },
+      createdAt: at,
+    });
+  });
+
+it.live("a turn start that asks to queue runs at once on a thread whose session stopped", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+      yield* setStoppedSession(harness);
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession(turnResponse("wake reply"));
+
+      const idle = yield* watchEvents(harness, isSessionStatus("ready"));
+      yield* startTurn(harness, { id: "wake", text: "wake message", whenBusy: "queue" });
+      assert.deepEqual(yield* eventTypesFor(harness, "cmd-wake"), [
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      yield* harness.adapterHarness!.awaitSends(THREAD_ID, 1);
+      assert.deepEqual(inputsOf(harness.adapterHarness!.getTurnInputs(THREAD_ID)), [
+        "wake message",
+      ]);
+      yield* Fiber.join(idle);
+    }),
+  ),
+);
+
+it.live("a turn start that asks to queue runs at once after a failed turn", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession(
+        turnResponse("person reply", undefined, { failed: true }),
+      );
+      // The failed turn leaves the session in error with no active turn.
+      const errored = yield* watchEvents(harness, isSessionStatus("error"));
+      yield* startTurn(harness, { id: "person", text: "person message" });
+      yield* Fiber.join(errored);
+
+      yield* harness.adapterHarness!.queueTurnResponse(THREAD_ID, turnResponse("wake reply"));
+      const idle = yield* watchEvents(harness, isSessionStatus("ready"));
+      yield* startTurn(harness, { id: "wake", text: "wake message", whenBusy: "queue" });
+      assert.deepEqual(yield* eventTypesFor(harness, "cmd-wake"), [
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      yield* harness.adapterHarness!.awaitSends(THREAD_ID, 2);
+      assert.deepEqual(inputsOf(harness.adapterHarness!.getTurnInputs(THREAD_ID)), [
+        "person message",
+        "wake message",
+      ]);
+      yield* Fiber.join(idle);
+    }),
+  ),
+);
+
+it.live(
+  "a turn start that asks to queue waits for a turn that raised a runtime error without a turn id",
+  () =>
+    withHarness((harness) =>
+      Effect.gen(function* () {
+        yield* seedProjectAndThread(harness);
+        const release = yield* Deferred.make<void>();
+        yield* harness.adapterHarness!.queueTurnResponseForNextSession(
+          turnResponse("person reply", release, { runtimeError: true }),
+        );
+        // The error arrives while the turn still runs, and names no turn.
+        const errored = yield* watchEvents(harness, isSessionStatus("error"));
+        yield* startTurn(harness, { id: "person", text: "person message" });
+        yield* Fiber.join(errored);
+
+        yield* harness.adapterHarness!.queueTurnResponse(THREAD_ID, turnResponse("wake reply"));
+        const held = yield* watchEvents(
+          harness,
+          isForCommand("thread.turn-start-deferred", "cmd-wake"),
+        );
+        const bothIdle = yield* watchEvents(harness, isSessionStatus("ready"), 2);
+        yield* startTurn(harness, { id: "wake", text: "wake message", whenBusy: "queue" });
+        yield* awaitHandledWhileBusy(harness, held, 2);
+        yield* Deferred.succeed(release, undefined);
+        yield* harness.adapterHarness!.awaitSends(THREAD_ID, 2);
+
+        const adapter = harness.adapterHarness!;
+        assert.deepEqual(inputsOf(adapter.getSteers(THREAD_ID)), []);
+        assert.deepEqual(inputsOf(adapter.getTurnInputs(THREAD_ID)), [
+          "person message",
+          "wake message",
+        ]);
+        yield* Fiber.join(bothIdle);
+        assert.deepEqual(yield* eventTypesFor(harness, "cmd-wake"), [
+          "thread.turn-start-deferred",
+          "thread.message-sent",
+          "thread.turn-start-requested",
+        ]);
+      }),
+    ),
 );
 
 it.live("a turn start that does not ask to wait still steers into the running turn", () =>

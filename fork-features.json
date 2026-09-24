@@ -240,6 +240,27 @@
       "patchesUpstream": true
     },
     {
+      "name": "fm-turn-start-when-busy-ended-session",
+      "description": "A thread whose session ended (stopped, interrupted or error) counts as free for a turn start that asks to queue once no turn is active and the latest turn is not running, so the start runs at once instead of becoming a deferred turn start that no event releases. A runtime error without a turn id keeps the running turn named in the session, so an error raised mid-turn keeps the thread busy while an error left by a failed turn frees it. A deferred turn start an older server left on such a thread runs at the next startup, through the startup release loop.",
+      "keep": "deferredTurnStarts.ts is ours whole, including the ended-session rule in sessionIsFree. In ProviderRuntimeIngestion.ts the runtime.error session-set keeps activeTurnId: eventTurnId ?? activeTurnId; everything else in that file takes upstream.",
+      "files": [
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts"
+      ],
+      "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
+      "testName": "a turn start that asks to queue runs at once on a thread whose session stopped|a turn start that asks to queue runs at once after a failed turn|a turn start that asks to queue waits for a turn that raised a runtime error without a turn id",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy-ended-session-restart-test",
+      "description": "The startup test for fm-turn-start-when-busy-ended-session: a deferred turn start left on a stopped session before a restart runs after it. A testName narrows a single test file, and this test lives in another file, so it has its own entry.",
+      "keep": "The test named in testName survives in orphanedProviderSessionStartup.integration.test.ts. Everything else in that file takes upstream.",
+      "files": ["apps/server/integration/orphanedProviderSessionStartup.integration.test.ts"],
+      "test": "apps/server/integration/orphanedProviderSessionStartup.integration.test.ts",
+      "testName": "starts a turn start deferred on a stopped session after a restart",
+      "patchesUpstream": true
+    },
+    {
       "name": "claude-option-change-keeps-background-work",
       "description": "A Claude model or option change, such as the context window, no longer restarts a session that has live background work. A restart ends every background shell and agent the Claude process runs. The reactor keeps that session, and the adapter applies the change to it with setModel, applyFlagSettings and setMaxThinkingTokens. With no background work the change still restarts, as upstream does.",
       "keep": "The backgroundLiveness condition on shouldRestartForModelSelectionChange survives in ProviderCommandReactor.ts. In ClaudeAdapter.ts these survive: ClaudeFlagSettings and its Query import, ClaudeSelectionSettings, flagOrCleared, resolveClaudeSelectionSettings, launchThinkingDisplay, applySelectionSettings, the selectionSettings context field in place of currentEffort (and the subagent effort that reads it), the applyFlagSettings member and the thinkingDisplay parameter of setMaxThinkingTokens in ClaudeQueryRuntime, and their use in startSession and sendTurn. In ProviderCommandReactor.test.ts these survive: the two tests named in testName, the backgroundLiveness harness field, ThreadBackgroundLivenessService in the runtime type, and Layer.provideMerge(ThreadBackgroundLiveness.layer) in projectionSnapshotLayer. Everything else in those files takes upstream.",

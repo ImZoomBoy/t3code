@@ -78,13 +78,34 @@ type Project = (
   event: OrchestrationEvent,
 ) => Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError>;
 
+/**
+ * The thread's session runs no turn and is not starting one. A session that
+ * ended (`stopped`, `interrupted`, `error`) is free once it names no active
+ * turn and the latest turn is not running; a turn start there starts a new
+ * session, as a direct send does. A runtime error without a turn id keeps the
+ * running turn named, so an `error` left by a failed turn is free and one
+ * raised mid-turn is not.
+ */
+function sessionIsFree(thread: OrchestrationThread): boolean {
+  const session = thread.session ?? null;
+  if (session === null) return true;
+  switch (session.status) {
+    case "idle":
+    case "ready":
+      return true;
+    case "stopped":
+    case "interrupted":
+    case "error":
+      return session.activeTurnId === null && thread.latestTurn?.state !== "running";
+    case "starting":
+    case "running":
+      return false;
+  }
+}
+
 /** No turn is running or starting and none has been asked for. */
 export function threadIsFree(thread: OrchestrationThread): boolean {
-  const status = thread.session?.status;
-  return (
-    (status === undefined || status === "ready" || status === "idle") &&
-    (thread.pendingTurnStart ?? null) === null
-  );
+  return sessionIsFree(thread) && (thread.pendingTurnStart ?? null) === null;
 }
 
 /** A start that asks to queue waits behind anything busy and behind earlier waiting starts. */
