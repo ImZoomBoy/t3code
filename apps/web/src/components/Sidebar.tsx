@@ -165,7 +165,9 @@ import {
   isPrototypeThread,
   planPrototypeFleetRows,
   type PrototypeFleetEntry,
+  prototypeEffortLabel,
   prototypeFoldStartsOpen,
+  prototypeRoleClassName,
   prototypeRoleWord,
   useFleetPrototypeVariant,
 } from "./sidebar/FleetSidebarPrototype";
@@ -994,6 +996,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         readonly depth: 0 | 1 | 2;
         readonly fold?: { readonly expanded: boolean; readonly onToggle: () => void } | undefined;
         readonly note?: string | undefined;
+        readonly accent?: boolean | undefined;
         readonly onTogglePin?: (() => void) | undefined;
       }
     | undefined;
@@ -1239,6 +1242,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const isFirstMate = prototypeFleet === undefined && isFirstMateThread(thread);
   const roleLabel = isFirstMate || prototypeFleet ? null : fleetRoleLabel(thread);
   const prototypeRole = prototypeFleet ? prototypeRoleWord(thread) : null;
+  const prototypeEffort = prototypeFleet?.accent
+    ? prototypeEffortLabel(thread.modelSelection)
+    : null;
   const displayTitle = threadDisplayTitle(thread);
 
   // The local environment is "this machine" and needs no marker; every other
@@ -2044,7 +2050,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {/* N2b gives this line to role, model and effort; the branch stays in the tooltip. */}
+              {thread.branch && !prototypeFleet?.accent ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="flex min-w-0 text-muted-foreground/40">
@@ -2060,8 +2067,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   data-testid={`sidebar-model-${thread.id}`}
                   className="shrink-0 whitespace-nowrap text-muted-foreground/70"
                 >
-                  {prototypeRole ? `${prototypeRole} \u00b7 ` : null}
+                  {prototypeRole ? (
+                    <>
+                      <span
+                        className={
+                          prototypeFleet?.accent ? prototypeRoleClassName(thread) : undefined
+                        }
+                      >
+                        {prototypeRole}
+                      </span>
+                      {" \u00b7 "}
+                    </>
+                  ) : null}
                   {modelLabel}
+                  {prototypeEffort ? ` \u00b7 ${prototypeEffort}` : null}
                   {prototypeFleet?.note ? ` \u00b7 ${prototypeFleet.note}` : null}
                 </span>
               ) : null}
@@ -4936,6 +4955,7 @@ export default function Sidebar() {
                                 ? {
                                     depth: prototypeEntry.depth,
                                     note: prototypeEntry.note,
+                                    accent: prototypeEntry.accent,
                                     fold: prototypeEntry.fold
                                       ? {
                                           expanded: prototypeEntry.fold.expanded,
@@ -5078,7 +5098,19 @@ export default function Sidebar() {
                         renderThreadRowInner(entry.thread, "active", undefined, false, entry);
                       const items: ReactNode[] = [
                         ...(prototypePlan !== null
-                          ? prototypePlan.top.map(renderPrototypeEntry)
+                          ? prototypePlan.top.flatMap((entry) =>
+                              entry.dividerAfter
+                                ? [
+                                    renderPrototypeEntry(entry),
+                                    // N2b: sets the pinned First Mate apart from every row below.
+                                    <li
+                                      key="prototype-first-mate-divider"
+                                      aria-hidden
+                                      className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border"
+                                    />,
+                                  ]
+                                : [renderPrototypeEntry(entry)],
+                            )
                           : firstMateThreads.length > 0
                             ? firstMateThreads.map((thread) =>
                                 renderThreadRowInner(thread, "pinned", undefined, true),

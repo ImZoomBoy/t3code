@@ -23,6 +23,7 @@ import type { FleetBranch } from "../Sidebar.logic";
 export const FLEET_PROTOTYPE_VARIANTS = [
   { key: "N1", name: "Tree under First Mate" },
   { key: "N2", name: "Flat second mates" },
+  { key: "N2b", name: "N2, coloured roles and effort" },
   { key: "N3", name: "Flat second mates, folded" },
 ] as const;
 export type FleetPrototypeVariant = (typeof FLEET_PROTOTYPE_VARIANTS)[number]["key"];
@@ -76,6 +77,45 @@ export function isPrototypeThread(thread: { readonly id: string }): boolean {
   return thread.id.startsWith("prototype-");
 }
 
+/**
+ * N2b's role word colour: First Mate keeps its pink, second mates violet and
+ * workers teal. None of the three is a status colour (blue working, amber
+ * approval, red failed, green done), so a role never reads as a state.
+ */
+export function prototypeRoleClassName(thread: {
+  readonly fleetRole?: string | null | undefined;
+}): string | undefined {
+  switch (thread.fleetRole) {
+    case "first-mate":
+      return "text-pink-600 dark:text-pink-400";
+    case "second-mate":
+      return "text-violet-600 dark:text-violet-400";
+    case "worker":
+      return "text-teal-700 dark:text-teal-400";
+    default:
+      return undefined;
+  }
+}
+
+const EFFORT_LABELS: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+/** The reasoning level a model selection runs at, in words, or null when it has none. */
+export function prototypeEffortLabel(selection: {
+  readonly options?: ReadonlyArray<{ readonly id: string; readonly value: unknown }> | undefined;
+}): string | null {
+  const option = selection.options?.find(
+    (entry) => entry.id === "effort" || entry.id === "reasoningEffort",
+  );
+  return typeof option?.value === "string" ? (EFFORT_LABELS[option.value] ?? option.value) : null;
+}
+
 /** The grey role word a fleet row shows where the model name sits. */
 export function prototypeRoleWord(thread: {
   readonly fleetRole?: string | null | undefined;
@@ -110,11 +150,13 @@ interface MockSpec {
   readonly branch?: string;
   readonly working?: boolean;
   readonly approval?: boolean;
+  readonly effort: "low" | "medium" | "high" | "xhigh";
 }
 
 const MOCK_FLEET: readonly MockSpec[] = [
   {
     id: "fm",
+    effort: "medium",
     title: "First Mate",
     role: "first-mate",
     repo: "firstmate",
@@ -123,6 +165,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "sm-firstmate",
+    effort: "high",
     title: "Keep the fleet daemon healthy",
     role: "second-mate",
     repo: "firstmate",
@@ -131,6 +174,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "sm-t3code",
+    effort: "high",
     title: "Fork upkeep and fleet sidebar",
     role: "second-mate",
     repo: "t3code",
@@ -140,6 +184,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "sm-lavish",
+    effort: "medium",
     title: "Review surface polish",
     role: "second-mate",
     repo: "lavish-axi",
@@ -148,6 +193,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "w-quota",
+    effort: "xhigh",
     title: "Quota dispatch headroom gate",
     role: "worker",
     repo: "firstmate",
@@ -158,6 +204,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "w-diff",
+    effort: "low",
     title: "Diff pages reload after a reconnect",
     role: "worker",
     repo: "t3code",
@@ -167,6 +214,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "w-env",
+    effort: "high",
     title: "Deferred turn keeps its environment",
     role: "worker",
     repo: "t3code",
@@ -177,6 +225,7 @@ const MOCK_FLEET: readonly MockSpec[] = [
   },
   {
     id: "w-tree",
+    effort: "medium",
     title: "Fleet sidebar tree",
     role: "worker",
     repo: "t3code",
@@ -206,7 +255,13 @@ export function buildPrototypeFleetThreads(
       id: threadId,
       projectId: projectIdForRepo(spec.repo) ?? ProjectId.make(`prototype-${spec.repo}`),
       title: spec.title,
-      modelSelection: spec.model,
+      modelSelection: {
+        ...spec.model,
+        options: [
+          ...("options" in spec.model ? spec.model.options : []),
+          { id: "effort", value: spec.effort },
+        ],
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: spec.branch ?? null,
@@ -255,6 +310,10 @@ export interface PrototypeFleetEntry {
   readonly fold?: { readonly key: string; readonly expanded: boolean } | undefined;
   /** Grey text after the model, such as "3 workers". */
   readonly note?: string | undefined;
+  /** N2b: the role word in its colour and the reasoning level after the model. */
+  readonly accent?: boolean | undefined;
+  /** N2b: a divider under the pinned First Mate row. */
+  readonly dividerAfter?: boolean | undefined;
 }
 
 const FIRST_MATE_FOLD = "first-mate";
@@ -277,6 +336,7 @@ export function planPrototypeFleetRows(input: {
 } {
   const { variant, firstMate, branches, isExpanded } = input;
   const tree = variant === "N1";
+  const accent = variant === "N2b";
   const mates: PrototypeFleetEntry[] = [];
   for (const branch of branches) {
     if (branch.secondMate === null) continue;
@@ -285,6 +345,7 @@ export function planPrototypeFleetRows(input: {
     mates.push({
       thread: branch.secondMate,
       depth: tree ? 1 : 0,
+      accent,
       fold: count > 0 ? { key: branch.repo, expanded } : undefined,
       note:
         variant === "N3" && count > 0
@@ -293,13 +354,15 @@ export function planPrototypeFleetRows(input: {
     });
     if (!expanded) continue;
     for (const worker of branch.workers) {
-      mates.push({ thread: worker, depth: tree ? 2 : 1 });
+      mates.push({ thread: worker, depth: tree ? 2 : 1, accent });
     }
   }
   const firstMateEntry: PrototypeFleetEntry | null = firstMate
     ? {
         thread: firstMate,
         depth: 0,
+        accent,
+        dividerAfter: accent && input.firstMatePinned,
         fold:
           tree && mates.length > 0
             ? { key: FIRST_MATE_FOLD, expanded: isExpanded(FIRST_MATE_FOLD) }
