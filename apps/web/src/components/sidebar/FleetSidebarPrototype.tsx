@@ -9,6 +9,7 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   type EnvironmentId,
+  type ProjectIconColor,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -18,12 +19,15 @@ import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
+import { projectIconColorClassName } from "../../projectIconColors";
+import { deriveProjectIdentity } from "../../projectIdentity";
 import type { FleetBranch } from "../Sidebar.logic";
 
 export const FLEET_PROTOTYPE_VARIANTS = [
   { key: "N1", name: "Tree under First Mate" },
   { key: "N2", name: "Flat second mates" },
   { key: "N2b", name: "N2, coloured roles and effort" },
+  { key: "N2c", name: "N2b, roles in project colours" },
   { key: "N3", name: "Flat second mates, folded" },
 ] as const;
 export type FleetPrototypeVariant = (typeof FLEET_PROTOTYPE_VARIANTS)[number]["key"];
@@ -95,6 +99,60 @@ export function prototypeRoleClassName(thread: {
     default:
       return undefined;
   }
+}
+
+// Light-mode text needs a darker step for the pale hues: their -600 icon
+// shade falls under 4.5:1 on the light sidebar. Dark mode keeps the icon shade.
+const TEXT_SHADE_OVERRIDES: Partial<Record<ProjectIconColor, string>> = {
+  amber: "text-amber-700 dark:text-amber-400",
+  yellow: "text-yellow-700 dark:text-yellow-400",
+  lime: "text-lime-700 dark:text-lime-400",
+  green: "text-green-700 dark:text-green-400",
+  emerald: "text-emerald-700 dark:text-emerald-400",
+  teal: "text-teal-700 dark:text-teal-400",
+  cyan: "text-cyan-700 dark:text-cyan-400",
+};
+
+interface ColouredProject {
+  readonly title: string;
+  readonly projectIcon?:
+    | { readonly kind: string; readonly color?: ProjectIconColor | undefined }
+    | null
+    | undefined;
+}
+
+/**
+ * N2c's role word colour: the colour the app gives this project's icon. An
+ * icon the user picked carries its colour; with no icon the monogram colour
+ * comes from the project's name, the same derivation the icon uses. An emoji
+ * or image icon has no single colour, so the word stays grey.
+ */
+export function prototypeProjectTextClassName(project: ColouredProject | null): string | undefined {
+  if (project === null) return undefined;
+  const icon = project.projectIcon;
+  const color = icon ? icon.color : deriveProjectIdentity(project.title).color;
+  if (color === undefined) return undefined;
+  return TEXT_SHADE_OVERRIDES[color] ?? projectIconColorClassName(color);
+}
+
+// N2c's mock projects: distinct monogram colours so the effect shows. Pink
+// stays First Mate's alone.
+const MOCK_PROJECT_ICONS: Record<
+  string,
+  { readonly text: string; readonly color: ProjectIconColor }
+> = {
+  firstmate: { text: "FM", color: "orange" },
+  t3code: { text: "T3", color: "indigo" },
+  "lavish-axi": { text: "LA", color: "emerald" },
+};
+
+/** A fleet row's project with N2c's mock icon, when its repository has one. */
+export function prototypeMockProject<T extends ColouredProject>(
+  project: T,
+  repo: string | null,
+): T {
+  const icon = repo === null ? undefined : MOCK_PROJECT_ICONS[repo];
+  return icon ? { ...project, projectIcon: { kind: "monogram", ...icon } } : project;
 }
 
 const EFFORT_LABELS: Record<string, string> = {
@@ -311,7 +369,7 @@ export interface PrototypeFleetEntry {
   /** Grey text after the model, such as "3 workers". */
   readonly note?: string | undefined;
   /** N2b: the role word in its colour and the reasoning level after the model. */
-  readonly accent?: boolean | undefined;
+  readonly accent?: "fixed" | "project" | undefined;
   /** N2b: a divider under the pinned First Mate row. */
   readonly dividerAfter?: boolean | undefined;
 }
@@ -336,7 +394,7 @@ export function planPrototypeFleetRows(input: {
 } {
   const { variant, firstMate, branches, isExpanded } = input;
   const tree = variant === "N1";
-  const accent = variant === "N2b";
+  const accent = variant === "N2b" ? "fixed" : variant === "N2c" ? "project" : undefined;
   const mates: PrototypeFleetEntry[] = [];
   for (const branch of branches) {
     if (branch.secondMate === null) continue;
@@ -362,7 +420,7 @@ export function planPrototypeFleetRows(input: {
         thread: firstMate,
         depth: 0,
         accent,
-        dividerAfter: accent && input.firstMatePinned,
+        dividerAfter: accent !== undefined && input.firstMatePinned,
         fold:
           tree && mates.length > 0
             ? { key: FIRST_MATE_FOLD, expanded: isExpanded(FIRST_MATE_FOLD) }

@@ -167,6 +167,8 @@ import {
   type PrototypeFleetEntry,
   prototypeEffortLabel,
   prototypeFoldStartsOpen,
+  prototypeMockProject,
+  prototypeProjectTextClassName,
   prototypeRoleClassName,
   prototypeRoleWord,
   useFleetPrototypeVariant,
@@ -996,7 +998,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         readonly depth: 0 | 1 | 2;
         readonly fold?: { readonly expanded: boolean; readonly onToggle: () => void } | undefined;
         readonly note?: string | undefined;
-        readonly accent?: boolean | undefined;
+        readonly accent?: "fixed" | "project" | undefined;
         readonly onTogglePin?: (() => void) | undefined;
       }
     | undefined;
@@ -2071,7 +2073,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     <>
                       <span
                         className={
-                          prototypeFleet?.accent ? prototypeRoleClassName(thread) : undefined
+                          prototypeFleet?.accent === "project" && !isFirstMateThread(thread)
+                            ? prototypeProjectTextClassName(props.project)
+                            : prototypeFleet?.accent
+                              ? prototypeRoleClassName(thread)
+                              : undefined
                         }
                       >
                         {prototypeRole}
@@ -5039,10 +5045,15 @@ export default function Sidebar() {
                             environmentMachine={
                               environmentMachineById.get(thread.environmentId) ?? "server"
                             }
-                            project={
-                              projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
-                              null
-                            }
+                            project={(() => {
+                              const project =
+                                projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+                                null;
+                              // N2c: mock projects get distinct icon colours.
+                              return project && prototypeEntry?.accent === "project"
+                                ? prototypeMockProject(project, project.title)
+                                : project;
+                            })()}
                             projectDisplayName={
                               projectDisplayNameByKey.get(
                                 `${thread.environmentId}:${thread.projectId}`,
