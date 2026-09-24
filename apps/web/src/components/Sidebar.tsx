@@ -984,6 +984,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // shortens to the repository (second mate) or drops (worker), and slim rows
   // keep full strength instead of receding like settled history.
   inFleetTree?: boolean | undefined;
+  // Role words lead the row: "Second mate - t3code" or "Worker" is the main
+  // line and the task sits under it. "compact" drops the card's third line.
+  fleetWords?: "full" | "compact" | undefined;
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1223,15 +1226,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     selectedModel ? getTriggerDisplayModelLabel(selectedModel) : null,
   );
   const isFirstMate = isFirstMateThread(thread);
-  const roleLabel =
-    isFirstMate || (props.inFleetTree && thread.fleetRole === "worker")
+  const fleetWords = thread.fleetRole ? props.fleetWords : undefined;
+  const roleLabel = fleetWords
+    ? isFirstMate
+      ? null
+      : fleetRoleLabel(thread)
+    : isFirstMate || (props.inFleetTree && thread.fleetRole === "worker")
       ? null
       : props.inFleetTree && thread.fleetRole === "second-mate"
         ? (thread.fleetRepo ?? null)
         : fleetRoleLabel(thread);
   const displayTitle = threadDisplayTitle(thread);
   // A fleet row shows its role's mark where other rows show their project.
-  const fleetGlyph = thread.fleetRole ? <FleetRoleIcon role={thread.fleetRole} /> : null;
+  const fleetGlyph = thread.fleetRole ? (
+    <FleetRoleIcon role={thread.fleetRole} className={fleetWords ? "size-3.5" : undefined} />
+  ) : null;
 
   // The local environment is "this machine" and needs no marker; every other
   // one gets its machine glyph. With no local environment (the hosted app)
@@ -1497,27 +1506,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
-        variant === "card"
-          ? cn(
-              "truncate",
-              shouldRecede
-                ? "text-secondary-label"
-                : isUnread || isWoke || status === "input"
-                  ? "text-foreground"
-                  : status === "failed"
-                    ? "text-foreground/95"
-                    : "text-foreground/90",
-            )
-          : cn(
-              "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
-              shouldRecede
-                ? "text-secondary-label/70"
-                : props.isActive || isWoke || status === "input"
-                  ? "text-foreground"
-                  : isUnread
-                    ? "text-muted-foreground"
-                    : "text-secondary-label/70",
-            ),
+        fleetWords && variant === "card"
+          ? "truncate text-xs font-normal text-muted-foreground"
+          : fleetWords && isFirstMate
+            ? "truncate font-semibold text-pink-950 dark:text-pink-50"
+            : variant === "card"
+              ? cn(
+                  "truncate",
+                  shouldRecede
+                    ? "text-secondary-label"
+                    : isUnread || isWoke || status === "input"
+                      ? "text-foreground"
+                      : status === "failed"
+                        ? "text-foreground/95"
+                        : "text-foreground/90",
+                )
+              : cn(
+                  "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+                  shouldRecede
+                    ? "text-secondary-label/70"
+                    : props.isActive || isWoke || status === "input"
+                      ? "text-foreground"
+                      : isUnread
+                        ? "text-muted-foreground"
+                        : "text-secondary-label/70",
+                ),
         isRegeneratingTitle && "opacity-[0.55]",
       )}
     >
@@ -1527,7 +1540,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const roleBadge = roleLabel ? (
     <span
       data-testid={`sidebar-fleet-role-${thread.id}`}
-      className="min-w-0 truncate text-xs text-muted-foreground/70"
+      className={cn(
+        "min-w-0 truncate",
+        fleetWords
+          ? "flex-1 text-sm font-medium text-foreground"
+          : "text-xs text-muted-foreground/70",
+      )}
     >
       {roleLabel}
     </span>
@@ -1789,7 +1807,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {...(fileDropHandlers ?? {})}
       className={cn(
         // Matches the h-[4.875rem] content box; the py-0.5 padding is added on top.
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
+        "list-none py-0.5",
+        fleetWords === "compact"
+          ? "[contain-intrinsic-size:auto_52px] [content-visibility:auto]"
+          : "[content-visibility:auto] [contain-intrinsic-size:auto_78px]",
         sortable?.isDragging && "relative z-20",
         props.rowClassName,
       )}
@@ -1811,7 +1832,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div
+            className={cn(
+              "relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]",
+              fleetWords === "compact" ? "h-[3.25rem]" : "h-[4.875rem]",
+            )}
+          >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {isFirstMate ? (
@@ -1845,9 +1871,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     </span>
                   ) : null}
                   {roleBadge}
-                  {props.projectDisplayName === null ||
-                  roleBadge !== null ||
-                  (props.inFleetTree && thread.fleetRole) ? (
+                  {fleetWords ? null : props.projectDisplayName === null ||
+                    roleBadge !== null ||
+                    (props.inFleetTree && thread.fleetRole) ? (
                     <span className="flex-1" />
                   ) : null}
                 </>
@@ -1997,7 +2023,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </span>
               ) : null}
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            <div
+              className={cn(
+                "mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs",
+                fleetWords === "compact" && "hidden",
+              )}
+            >
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -2238,13 +2269,19 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 // MOCKUP ONLY: picks one of three fleet layouts for design review.
-const FLEET_MOCKUP: "a" | "b" | "c" | null = (() => {
+type FleetMockup = "a" | "b" | "c" | "bw" | "bwc";
+const FLEET_MOCKUPS: readonly string[] = ["a", "b", "c", "bw", "bwc"];
+const FLEET_MOCKUP: FleetMockup | null = (() => {
   if (typeof window === "undefined") return null;
   const value = window.localStorage.getItem("t3.fleetMockup");
-  return value === "a" || value === "b" || value === "c" ? value : null;
+  return value !== null && FLEET_MOCKUPS.includes(value) ? (value as FleetMockup) : null;
 })();
 
-type FleetRowLayout = { readonly variant?: "card" | "slim"; readonly rowClassName?: string };
+type FleetRowLayout = {
+  readonly variant?: "card" | "slim";
+  readonly rowClassName?: string;
+  readonly words?: "full" | "compact" | undefined;
+};
 
 function FleetHeaderRow(props: { label: string }) {
   return (
@@ -2256,7 +2293,7 @@ function FleetHeaderRow(props: { label: string }) {
 }
 
 function renderFleetMockup(input: {
-  layout: "a" | "b" | "c" | null;
+  layout: FleetMockup | null;
   firstMate: EnvironmentThreadShell | null;
   branches: readonly FleetBranch<EnvironmentThreadShell>[];
   renderRow: (
@@ -2301,15 +2338,19 @@ function renderFleetMockup(input: {
     items.push(<li key="fleet-gap" aria-hidden className="h-2 list-none" />);
     return items;
   }
-  if (layout === "b") {
+  if (layout === "b" || layout === "bw" || layout === "bwc") {
+    const words = layout === "b" ? undefined : "full";
+    const workerWords = layout === "bwc" ? "compact" : words;
     if (firstMate) {
       items.push(
         renderRow(
           firstMate,
           {
             variant: "slim",
-            rowClassName:
-              "sticky top-0 z-20 mb-1 rounded-lg bg-pink-50 ring-1 ring-pink-500/30 dark:bg-pink-950/60 dark:ring-pink-400/30",
+            words,
+            rowClassName: words
+              ? "sticky top-0 z-20 mb-1 rounded-lg bg-pink-100 ring-1 ring-pink-500/40 dark:bg-pink-900/45 dark:ring-pink-400/35"
+              : "sticky top-0 z-20 mb-1 rounded-lg bg-pink-50 ring-1 ring-pink-500/30 dark:bg-pink-950/60 dark:ring-pink-400/30",
           },
           true,
         ),
@@ -2323,7 +2364,7 @@ function renderFleetMockup(input: {
         items.push(
           renderRow(
             branch.secondMate,
-            { rowClassName: "border-l-2 border-sky-500/60 pl-1 dark:border-sky-400/60" },
+            { words, rowClassName: "border-l-2 border-sky-500/60 pl-1 dark:border-sky-400/60" },
             true,
           ),
         );
@@ -2332,7 +2373,10 @@ function renderFleetMockup(input: {
         items.push(
           renderRow(
             worker,
-            { rowClassName: "ml-3 border-l-2 border-sky-500/20 pl-1 dark:border-sky-400/20" },
+            {
+              words: workerWords,
+              rowClassName: "ml-3 border-l-2 border-sky-500/20 pl-1 dark:border-sky-400/20",
+            },
             false,
           ),
         );
@@ -4959,6 +5003,7 @@ export default function Sidebar() {
                         fleetLayout?: {
                           readonly variant?: "card" | "slim";
                           readonly rowClassName?: string;
+                          readonly words?: "full" | "compact" | undefined;
                         },
                       ) => {
                         const threadKey = scopedThreadKey(
@@ -4979,6 +5024,7 @@ export default function Sidebar() {
                             variant={rowVariant}
                             rowClassName={fleetLayout?.rowClassName}
                             inFleetTree={fleetLayout !== undefined}
+                            fleetWords={fleetLayout?.words}
                             // Snoozed rows wake, settled rows un-settle, and cards settle.
                             variantAction={
                               section === "snoozed"
