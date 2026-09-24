@@ -47,6 +47,7 @@ import {
   ThreadPullRequestLinkedPayload,
   ThreadPullRequestSyncedPayload,
   ThreadPullRequestUnlinkedPayload,
+  ThreadReadOnlyClearedPayload,
   ThreadSnoozedPayload,
   ThreadUnpinnedPayload,
   ThreadUnarchivedPayload,
@@ -593,6 +594,22 @@ function projectCommandModelEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             pinnedAt: payload.pinnedAt,
             ...(payload.pinOrderKey !== undefined ? { pinOrderKey: payload.pinOrderKey } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.read-only-cleared":
+      return decodeForEvent(
+        ThreadReadOnlyClearedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            readOnly: false,
             updatedAt: payload.updatedAt,
           }),
         })),

@@ -878,8 +878,9 @@ export const OrchestrationThread = Schema.Struct({
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   // A window onto work being driven somewhere else. The agent that owns this
   // conversation refuses to be prompted through it, so the client shows no way
-  // to type. Set once at creation and never cleared: a thread does not become
-  // promptable later. Optional so old servers/clients interop; absent = false.
+  // to type. Set at creation. The fleet can clear it on a second mate's thread
+  // it owns, with `thread.read-only.clear`, to hand that thread to the person;
+  // nothing sets it again. Optional so old servers/clients interop; absent = false.
   readOnly: Schema.optional(Schema.Boolean),
   // The fleet created this thread, so the fleet may still prompt it even
   // while `readOnly` refuses everyone else. Set once at creation from the
@@ -1561,13 +1562,35 @@ const ThreadSessionStopCommand = Schema.Struct({
   onlyIfSettled: Schema.optional(Schema.Boolean),
 });
 
+const ThreadReadOnlyClearCommandFields = {
+  type: Schema.Literal("thread.read-only.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+} as const;
+
+/**
+ * Makes a fleet-owned second mate thread promptable, so the person can type
+ * into it. Only the fleet may send it, and there is no command that makes a
+ * thread read-only again. `issuer` follows the same rule as
+ * `ThreadTurnStartCommand.issuer`: a dispatch entry point stamps it from the
+ * authenticated session, and the wire shape cannot spell it.
+ */
+const ThreadReadOnlyClearCommand = Schema.Struct({
+  ...ThreadReadOnlyClearCommandFields,
+  issuer: Schema.optional(Schema.Literal("fleet")),
+});
+
+const WireThreadReadOnlyClearCommand = Schema.Struct(ThreadReadOnlyClearCommandFields);
+
 /**
  * The twenty-one commands that read the same whoever sent them.
  *
  * `thread.create` and `thread.turn.start` are the two that do not: each has a
  * narrow client shape and a wide server shape, and the three unions below
  * differ only in which of the two they pick. Written once here so the
- * twenty-one cannot drift between them.
+ * twenty-one cannot drift between them. `thread.read-only.clear` is the
+ * fleet's alone, so the client union leaves it out.
  */
 const SharedOrchestrationCommands = [
   ProjectCreateCommand,
@@ -1602,6 +1625,7 @@ const SharedOrchestrationCommands = [
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCreateCommand,
   ThreadTurnStartCommand,
+  ThreadReadOnlyClearCommand,
   ...SharedOrchestrationCommands,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -1641,6 +1665,7 @@ export type OrchestrationCommandIssuer = typeof OrchestrationCommandIssuer.Type;
 export const WireOrchestrationCommand = Schema.Union([
   ThreadCreateCommand,
   ClientThreadTurnStartCommand,
+  WireThreadReadOnlyClearCommand,
   ...SharedOrchestrationCommands,
 ]);
 export type WireOrchestrationCommand = typeof WireOrchestrationCommand.Type;
@@ -1869,6 +1894,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.pinned",
   "thread.unpinned",
   "thread.pin-reordered",
+  "thread.read-only-cleared",
   "thread.meta-updated",
   "thread.pull-request-linked",
   "thread.pull-request-unlinked",
@@ -2029,6 +2055,11 @@ export const ThreadUnpinnedPayload = Schema.Struct({
 export const ThreadPinReorderedPayload = Schema.Struct({
   threadId: ThreadId,
   orderKey: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadReadOnlyClearedPayload = Schema.Struct({
+  threadId: ThreadId,
   updatedAt: IsoDateTime,
 });
 
@@ -2333,6 +2364,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.pin-reordered"),
     payload: ThreadPinReorderedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.read-only-cleared"),
+    payload: ThreadReadOnlyClearedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

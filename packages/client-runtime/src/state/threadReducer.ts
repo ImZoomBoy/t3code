@@ -255,6 +255,16 @@ export function applyThreadDetailEvent(
         },
       };
 
+    case "thread.read-only-cleared":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          readOnly: false,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
     case "thread.pin-reordered":
       return {
         kind: "updated",

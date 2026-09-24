@@ -5,7 +5,6 @@ import * as Path from "effect/Path";
 import {
   AuthFleetSubject,
   type WireOrchestrationCommand,
-  type ClientOrchestrationCommand,
   type UserInputAttachments,
   getProviderAttachmentLimitError,
   type IsoDateTime,
@@ -171,6 +170,13 @@ export const normalizeDispatchCommand = (
       // and `fleetOwned` is what lets the fleet prompt this thread later and
       // no other read-only one.
       return { ...canonicalCommand, issuer } satisfies OrchestrationCommand;
+    }
+
+    // Unstamped, the decider refuses it: only the fleet may open a thread.
+    if (canonicalCommand.type === "thread.read-only.clear") {
+      return (
+        issuer === "fleet" ? { ...canonicalCommand, issuer } : canonicalCommand
+      ) satisfies OrchestrationCommand;
     }
 
     if (
@@ -403,7 +409,7 @@ export const normalizeDispatchCommand = (
 
 export const cleanupFailedUploadedAttachments = Effect.fn(
   "Normalizer.cleanupFailedUploadedAttachments",
-)(function* (command: ClientOrchestrationCommand, normalizedCommand: OrchestrationCommand) {
+)(function* (command: WireOrchestrationCommand, normalizedCommand: OrchestrationCommand) {
   const originalAttachments =
     command.type === "thread.turn.start"
       ? command.message.attachments

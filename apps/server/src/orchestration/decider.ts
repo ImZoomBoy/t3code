@@ -52,7 +52,7 @@ import {
   releaseDeferredTurnStart,
   threadIsFree,
 } from "./deferredTurnStarts.ts";
-import { isFirstMateThread, resolveFleetRepo } from "./fleetThreads.ts";
+import { isFirstMateThread, readOnlyClearRefusal, resolveFleetRepo } from "./fleetThreads.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
@@ -936,6 +936,38 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
         payload: {
           threadId: command.threadId,
           updatedAt: alreadyUnpinned ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.read-only.clear": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const refusal = readOnlyClearRefusal(thread, command.issuer);
+      if (refusal !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: refusal,
+        });
+      }
+      // Idempotent by re-emission (see thread.settle): clearing a thread that
+      // is already promptable keeps its updatedAt, so it projects as a no-op.
+      const alreadyPromptable = thread.readOnly !== true;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.read-only-cleared",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: alreadyPromptable ? thread.updatedAt : occurredAt,
         },
       };
     }

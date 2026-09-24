@@ -110,8 +110,11 @@ characters, and on completion - the same shape
 
 ## Read-only is a rule, not a rendering
 
-`readOnly` is set once when the thread is created and never cleared. It is
-enforced in [the decider](../../apps/server/src/orchestration/decider.ts) by
+`readOnly` is set when the thread is created. The one way to clear it is
+`thread.read-only.clear`, which the decider accepts only from the fleet and only
+on a fleet-owned second mate thread: that is how First Mate hands a second mate
+to the person. A worker thread is never cleared, and nothing sets `readOnly`
+again. It is enforced in [the decider](../../apps/server/src/orchestration/decider.ts) by
 `requireThreadPromptable`, which refuses `thread.turn.start` and
 `thread.checkpoint.revert` on a read-only thread. Hiding the composer in the
 web and mobile clients is presentation; the refusal is what makes it true for

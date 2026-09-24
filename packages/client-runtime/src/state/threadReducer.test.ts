@@ -320,6 +320,28 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  it("opens a read-only thread when the fleet clears it", () => {
+    const updatedAt = "2026-04-01T06:00:00.000Z";
+    const result = applyThreadDetailEvent(
+      { ...baseThread, readOnly: true, fleetOwned: true, fleetRole: "second-mate" },
+      {
+        ...baseEventFields,
+        sequence: 6,
+        occurredAt: updatedAt,
+        aggregateKind: "thread",
+        aggregateId: baseThread.id,
+        type: "thread.read-only-cleared",
+        payload: { threadId: baseThread.id, updatedAt },
+      },
+    );
+
+    expect(result.kind).toBe("updated");
+    if (result.kind === "updated") {
+      expect(result.thread.readOnly).toBe(false);
+      expect(result.thread.updatedAt).toBe(updatedAt);
+    }
+  });
+
   describe("thread.meta-updated", () => {
     it.each(["f", null] as const)(
       "updates the active key to %s without activity",

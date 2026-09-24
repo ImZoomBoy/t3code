@@ -2173,6 +2173,42 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("advertises fleetThreadReadOnlyClear over the descriptor and server.getConfig", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          serverEnvironment: {
+            getDescriptor: Effect.succeed({
+              ...testEnvironmentDescriptor,
+              capabilities: {
+                ...testEnvironmentDescriptor.capabilities,
+                fleetThreadReadOnlyClear: true,
+              },
+            }),
+          },
+        },
+      });
+
+      const descriptorResponse = yield* fetchEffect(
+        yield* getHttpServerUrl("/.well-known/t3/environment"),
+      );
+      const descriptor = yield* responseJsonEffect<{
+        readonly capabilities: { readonly fleetThreadReadOnlyClear?: boolean };
+      }>(descriptorResponse);
+      assert.equal(descriptor.capabilities.fleetThreadReadOnlyClear, true);
+
+      const { cookie } = yield* bootstrapBrowserSession();
+      const wsUrl = appendSessionCookieToWsUrl(
+        yield* getWsServerUrl("/ws", { authenticated: false }),
+        cookie?.split(";")[0] ?? "",
+      );
+      const config = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
+      );
+      assert.equal(config.environment.capabilities.fleetThreadReadOnlyClear, true);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves snapshots for MCP handoff thread IDs above the router default", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make(
