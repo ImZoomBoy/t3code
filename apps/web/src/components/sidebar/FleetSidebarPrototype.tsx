@@ -20,7 +20,23 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CompassIcon,
+  BotIcon,
+  BrainIcon,
+  CogIcon,
+  CpuIcon,
   CrownIcon,
+  FlagIcon,
+  HammerIcon,
+  type LucideIcon,
+  MapIcon,
+  NavigationIcon,
+  PickaxeIcon,
+  SailboatIcon,
+  ShipIcon,
+  SparklesIcon,
+  StarIcon,
+  TelescopeIcon,
+  UsersIcon,
   HardHatIcon,
   ShipWheelIcon,
   WrenchIcon,
@@ -43,6 +59,16 @@ export const FLEET_PROTOTYPE_VARIANTS = [
   { key: "N2f", name: "whole row, project colours, crown icons" },
   { key: "N2g", name: "semibold titles, indigo shades, crown icons" },
   { key: "N2h", name: "bold title and role, palette, crown icons" },
+  { key: "V1", name: "icon only, medium titles, cool" },
+  { key: "V2", name: "bold role words, warm, no icons" },
+  { key: "V3", name: "coloured project names, project colours" },
+  { key: "V4", name: "muted whole row, grey icons" },
+  { key: "V5", name: "bold titles, grey crown icons, palette" },
+  { key: "V6", name: "medium roles, ship icons, cool" },
+  { key: "V7", name: "icon only, semibold titles, project colours" },
+  { key: "V8", name: "bold whole row, warm, sparkles icons" },
+  { key: "V9", name: "project name and role, indigo shades" },
+  { key: "V10", name: "plain titles, muted palette, no icons" },
 ] as const;
 export type FleetPrototypeVariant = (typeof FLEET_PROTOTYPE_VARIANTS)[number]["key"];
 
@@ -382,15 +408,19 @@ export function buildPrototypeFleetThreads(
  */
 export interface PrototypeLook {
   /** Which text carries the colour. */
-  readonly target: "role" | "title" | "row" | "title-role";
+  readonly target: "role" | "title" | "row" | "title-role" | "project" | "project-role";
   /** Weight of the coloured text on main threads. Workers stay regular. */
-  readonly mainWeight: "font-semibold" | "font-bold";
-  readonly icons: "wheel" | "crown";
+  readonly mainWeight: "font-normal" | "font-medium" | "font-semibold" | "font-bold";
+  /** The role as its word, as its icon, or both. */
+  readonly role?: "text" | "icon" | "both" | undefined;
+  readonly icons: "none" | "wheel" | "crown" | "star" | "ship" | "brain" | "telescope" | "sparkles";
   /** In place of the project icon, or just after it. */
   readonly placement: "replace" | "beside";
+  /** The icon in the thread's colour, or plain grey. */
+  readonly iconTone?: "match" | "muted" | undefined;
 }
 
-type Scheme = "project" | "palette" | "accent";
+type Scheme = "project" | "palette" | "accent" | "warm" | "cool" | "muted";
 
 const LOOKS: Partial<Record<FleetPrototypeVariant, PrototypeLook & { readonly scheme: Scheme }>> = {
   N2d: {
@@ -428,56 +458,165 @@ const LOOKS: Partial<Record<FleetPrototypeVariant, PrototypeLook & { readonly sc
     placement: "replace",
     scheme: "palette",
   },
+  V1: {
+    target: "title",
+    mainWeight: "font-medium",
+    role: "icon",
+    icons: "telescope",
+    placement: "replace",
+    iconTone: "match",
+    scheme: "cool",
+  },
+  V2: {
+    target: "role",
+    mainWeight: "font-bold",
+    role: "text",
+    icons: "none",
+    placement: "beside",
+    scheme: "warm",
+  },
+  V3: {
+    target: "project",
+    mainWeight: "font-semibold",
+    role: "both",
+    icons: "wheel",
+    placement: "beside",
+    iconTone: "match",
+    scheme: "project",
+  },
+  V4: {
+    target: "row",
+    mainWeight: "font-normal",
+    role: "both",
+    icons: "brain",
+    placement: "replace",
+    iconTone: "muted",
+    scheme: "muted",
+  },
+  V5: {
+    target: "title",
+    mainWeight: "font-bold",
+    role: "both",
+    icons: "crown",
+    placement: "replace",
+    iconTone: "muted",
+    scheme: "palette",
+  },
+  V6: {
+    target: "role",
+    mainWeight: "font-medium",
+    role: "both",
+    icons: "ship",
+    placement: "beside",
+    iconTone: "match",
+    scheme: "cool",
+  },
+  V7: {
+    target: "title",
+    mainWeight: "font-semibold",
+    role: "icon",
+    icons: "star",
+    placement: "beside",
+    iconTone: "match",
+    scheme: "project",
+  },
+  V8: {
+    target: "row",
+    mainWeight: "font-bold",
+    role: "both",
+    icons: "sparkles",
+    placement: "replace",
+    iconTone: "match",
+    scheme: "warm",
+  },
+  V9: {
+    target: "project-role",
+    mainWeight: "font-medium",
+    role: "both",
+    icons: "wheel",
+    placement: "replace",
+    iconTone: "muted",
+    scheme: "accent",
+  },
+  V10: {
+    target: "title",
+    mainWeight: "font-normal",
+    role: "text",
+    icons: "none",
+    placement: "beside",
+    scheme: "muted",
+  },
 };
 
-const FIRST_MATE_TONE = "text-pink-600 dark:text-pink-400";
-// One colour per second mate, in repo order. None is a status colour.
-const PALETTE_TONES = [
-  "text-violet-600 dark:text-violet-400",
-  "text-teal-700 dark:text-teal-400",
-  "text-orange-600 dark:text-orange-400",
-  "text-rose-600 dark:text-rose-400",
-];
-// One hue in steps, darkest first.
-const ACCENT_TONES = [
-  "text-indigo-700 dark:text-indigo-300",
-  "text-indigo-600 dark:text-indigo-400",
-  "text-indigo-500 dark:text-indigo-500",
-];
+// One colour per second mate, in repo order, for each scheme. First Mate
+// keeps a pink of the scheme's strength.
+const SCHEME_TONES: Record<Exclude<Scheme, "project">, readonly string[]> = {
+  palette: [
+    "text-violet-600 dark:text-violet-400",
+    "text-teal-700 dark:text-teal-400",
+    "text-orange-600 dark:text-orange-400",
+  ],
+  accent: [
+    "text-indigo-700 dark:text-indigo-300",
+    "text-indigo-600 dark:text-indigo-400",
+    "text-indigo-500 dark:text-indigo-500",
+  ],
+  warm: [
+    "text-amber-700 dark:text-amber-400",
+    "text-orange-600 dark:text-orange-400",
+    "text-rose-600 dark:text-rose-400",
+  ],
+  cool: [
+    "text-sky-700 dark:text-sky-300",
+    "text-teal-700 dark:text-teal-300",
+    "text-indigo-600 dark:text-indigo-300",
+  ],
+  muted: [
+    "text-indigo-900/75 dark:text-indigo-200/80",
+    "text-emerald-900/75 dark:text-emerald-200/80",
+    "text-amber-900/75 dark:text-amber-200/80",
+  ],
+};
 
-function mateTone(scheme: Scheme, repo: string, index: number): string | undefined {
-  switch (scheme) {
-    case "project": {
-      const icon = MOCK_PROJECT_ICONS[repo];
-      return icon
-        ? (TEXT_SHADE_OVERRIDES[icon.color] ?? projectIconColorClassName(icon.color))
-        : undefined;
-    }
-    case "palette":
-      return PALETTE_TONES[index % PALETTE_TONES.length];
-    case "accent":
-      return ACCENT_TONES[index % ACCENT_TONES.length];
-  }
+function firstMateTone(scheme: Scheme): string {
+  return scheme === "muted"
+    ? "text-pink-900/80 dark:text-pink-200/85"
+    : "text-pink-600 dark:text-pink-400";
 }
 
-/** A fleet role's icon from one of the two candidate sets. */
+function mateTone(scheme: Scheme, repo: string, index: number): string | undefined {
+  if (scheme === "project") {
+    const icon = MOCK_PROJECT_ICONS[repo];
+    return icon
+      ? (TEXT_SHADE_OVERRIDES[icon.color] ?? projectIconColorClassName(icon.color))
+      : undefined;
+  }
+  const tones = SCHEME_TONES[scheme];
+  return tones[index % tones.length];
+}
+
+const ICON_SETS: Record<
+  Exclude<PrototypeLook["icons"], "none">,
+  readonly [first: LucideIcon, second: LucideIcon, worker: LucideIcon]
+> = {
+  wheel: [ShipWheelIcon, AnchorIcon, WrenchIcon],
+  crown: [CrownIcon, CompassIcon, HardHatIcon],
+  star: [StarIcon, FlagIcon, HammerIcon],
+  ship: [ShipIcon, SailboatIcon, PickaxeIcon],
+  brain: [BrainIcon, UsersIcon, BotIcon],
+  telescope: [TelescopeIcon, MapIcon, CogIcon],
+  sparkles: [SparklesIcon, NavigationIcon, CpuIcon],
+};
+
+/** A fleet role's icon from one of the candidate sets. */
 export function PrototypeRoleIcon(props: {
   readonly set: PrototypeLook["icons"];
   readonly role: string | null | undefined;
   readonly className?: string | undefined;
 }) {
-  const Icon =
-    props.role === "first-mate"
-      ? props.set === "wheel"
-        ? ShipWheelIcon
-        : CrownIcon
-      : props.role === "second-mate"
-        ? props.set === "wheel"
-          ? AnchorIcon
-          : CompassIcon
-        : props.set === "wheel"
-          ? WrenchIcon
-          : HardHatIcon;
+  if (props.set === "none") return null;
+  const [first, second, worker] = ICON_SETS[props.set];
+  const Icon = props.role === "first-mate" ? first : props.role === "second-mate" ? second : worker;
   return <Icon aria-hidden className={props.className} />;
 }
 
@@ -564,7 +703,7 @@ export function planPrototypeFleetRows(input: {
         depth: 0,
         accent,
         look,
-        tone: look ? FIRST_MATE_TONE : undefined,
+        tone: lookSpec ? firstMateTone(lookSpec.scheme) : undefined,
         main: true,
         mockProject,
         dividerAfter: accent !== undefined && input.firstMatePinned,

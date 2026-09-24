@@ -1268,19 +1268,32 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       : undefined;
   const prototypeRoleClass = prototypeLook
     ? cn(
-        prototypeLook.target !== "title" && prototypeTone,
-        (prototypeLook.target === "role" || prototypeLook.target === "title-role") &&
+        prototypeLook.target !== "title" && prototypeLook.target !== "project" && prototypeTone,
+        (prototypeLook.target === "role" ||
+          prototypeLook.target === "title-role" ||
+          prototypeLook.target === "project-role") &&
           prototypeMainWeight,
       )
     : undefined;
   const prototypeRowClass = prototypeLook?.target === "row" ? prototypeTone : undefined;
-  const prototypeIcon = prototypeLook ? (
-    <PrototypeRoleIcon
-      set={prototypeLook.icons}
-      role={thread.fleetRole}
-      className={cn("size-3.5 shrink-0", prototypeFleet?.tone)}
-    />
-  ) : null;
+  const prototypeProjectClass =
+    prototypeLook &&
+    (prototypeLook.target === "row" ||
+      prototypeLook.target === "project" ||
+      prototypeLook.target === "project-role")
+      ? cn(prototypeTone, prototypeLook.target !== "row" && prototypeMainWeight)
+      : undefined;
+  const prototypeIcon =
+    prototypeLook && prototypeLook.icons !== "none" ? (
+      <PrototypeRoleIcon
+        set={prototypeLook.icons}
+        role={thread.fleetRole}
+        className={cn(
+          "size-3.5 shrink-0",
+          prototypeLook.iconTone === "muted" ? "text-muted-foreground" : prototypeTone,
+        )}
+      />
+    ) : null;
   const displayTitle = threadDisplayTitle(thread);
 
   // The local environment is "this machine" and needs no marker; every other
@@ -1926,7 +1939,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     <span
                       className={cn(
                         "truncate text-secondary-label text-xs",
-                        prototypeRowClass,
+                        prototypeProjectClass,
                         // Beside a role label the project name keeps its width
                         // up to a cap, and the label gives way first.
                         roleBadge === null ? "min-w-0 flex-1" : "max-w-[45%] shrink-0",
@@ -2111,7 +2124,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     prototypeRowClass,
                   )}
                 >
-                  {prototypeRole ? (
+                  {prototypeRole && prototypeLook?.role !== "icon" ? (
                     <>
                       <span
                         className={
