@@ -8,6 +8,7 @@ import {
   ProjectId,
   type MessageId,
   type ModelSelection,
+  type OrchestrationThreadShell,
   type PreviewAnnotationPayload,
   type ProviderInteractionMode,
   ProviderDriverKind,
@@ -1074,6 +1075,29 @@ export function getStartedThreadModelChangeBlockReason(input: {
   return {
     title: "Start a new chat to change models",
     description: "This provider does not allow switching models after a conversation has started.",
+  };
+}
+
+/**
+ * A move to another provider instance needs a new session, and the restart
+ * ends the background work the thread still runs. The server applies a model
+ * or option change on the same instance to the live session instead.
+ */
+export function getLiveBackgroundWorkRestartWarning(input: {
+  backgroundLiveness: OrchestrationThreadShell["backgroundLiveness"];
+  currentProviderInstanceId: ModelSelection["instanceId"] | null | undefined;
+  nextModelSelection: ModelSelection;
+}): { title: string; description: string } | null {
+  if (input.backgroundLiveness == null || input.currentProviderInstanceId == null) {
+    return null;
+  }
+  if (input.currentProviderInstanceId === input.nextModelSelection.instanceId) {
+    return null;
+  }
+  return {
+    title: "This switch restarts the session",
+    description:
+      "Background work in this thread stops when you send your next message. Switch back to keep it running.",
   };
 }
 

@@ -45,6 +45,7 @@ import {
   dismissBranchMismatchForSession,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
+  getLiveBackgroundWorkRestartWarning,
   getStartedThreadModelChangeBlockReason,
   hasEnvironmentReconnectWarningGraceElapsed,
   hasServerAcknowledgedLocalDispatch,
@@ -1553,6 +1554,45 @@ describe("buildExpiredTerminalContextToastCopy", () => {
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
     });
+  });
+});
+
+describe("getLiveBackgroundWorkRestartWarning", () => {
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const claudeWork = ProviderInstanceId.make("claude_work");
+
+  it("warns when a switch to another instance would end live background work", () => {
+    expect(
+      getLiveBackgroundWorkRestartWarning({
+        backgroundLiveness: "monitoring",
+        currentProviderInstanceId: claude,
+        nextModelSelection: { instanceId: claudeWork, model: "claude-opus-5-5" },
+      }),
+    ).toMatchObject({ title: "This switch restarts the session" });
+  });
+
+  it("stays quiet for a model or option change on the same instance", () => {
+    expect(
+      getLiveBackgroundWorkRestartWarning({
+        backgroundLiveness: "working",
+        currentProviderInstanceId: claude,
+        nextModelSelection: {
+          instanceId: claude,
+          model: "claude-sonnet-5",
+          options: [{ id: "contextWindow", value: "1m" }],
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("stays quiet when no background work is live", () => {
+    expect(
+      getLiveBackgroundWorkRestartWarning({
+        backgroundLiveness: null,
+        currentProviderInstanceId: claude,
+        nextModelSelection: { instanceId: claudeWork, model: "claude-opus-5-5" },
+      }),
+    ).toBeNull();
   });
 });
 

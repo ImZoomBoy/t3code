@@ -146,6 +146,7 @@ describe("ProviderCommandReactor", () => {
     | OrchestrationEngineService
     | ProviderCommandReactor
     | ProjectionSnapshotQuery
+    | ThreadBackgroundLiveness.ThreadBackgroundLivenessService
     | SqlClient.SqlClient,
     unknown
   > | null = null;
@@ -438,7 +439,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
     const projectionSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
-      Layer.provide(ThreadBackgroundLiveness.layer),
+      Layer.provideMerge(ThreadBackgroundLiveness.layer),
       Layer.provide(ThreadPlanProgress.layer),
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
@@ -526,6 +527,9 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
+    const backgroundLiveness = await runtime.runPromise(
+      Effect.service(ThreadBackgroundLiveness.ThreadBackgroundLivenessService),
+    );
     const runEffect = <A, E>(effect: Effect.Effect<A, E>) => runtime!.runPromise(effect);
 
     await Effect.runPromise(
@@ -655,6 +659,7 @@ describe("ProviderCommandReactor", () => {
       drain,
       startReactor,
       runEffect,
+      backgroundLiveness,
       get titleRegenerationCompletionDispatchAttempts() {
         return titleRegenerationCompletionDispatchAttempts;
       },
@@ -3617,6 +3622,121 @@ describe("ProviderCommandReactor", () => {
       ),
     });
   });
+
+  /**
+   * A restart ends the Claude process, and every background shell or agent
+   * it runs ends with it. The live session takes the new model and options
+   * instead, so a background command waiting on the user keeps running.
+   */
+  effectIt.effect(
+    "keeps a claude session with live background work when only the context window changes",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            threadModelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-opus-4-6",
+            },
+          }),
+        );
+        const now = "2026-01-01T00:00:00.000Z";
+        const turnStart = (index: number, contextWindow: string) =>
+          harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cmd-turn-start-claude-context-${index}`),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId(`user-message-claude-context-${index}`),
+              role: "user",
+              text: `claude turn ${index}`,
+              attachments: [],
+            },
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("claudeAgent"),
+              "claude-opus-4-6",
+              [{ id: "contextWindow", value: contextWindow }],
+            ),
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+
+        yield* turnStart(1, "200k");
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+
+        const liveness = harness.backgroundLiveness;
+        liveness.recordTaskLiveness({
+          threadId: "thread-1",
+          taskId: "background-shell-1",
+          taskType: "local_bash",
+          status: undefined,
+          kind: "started",
+        });
+
+        yield* turnStart(2, "1m");
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 2));
+
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+        expect(harness.stopSession).not.toHaveBeenCalled();
+        expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            "claude-opus-4-6",
+            [{ id: "contextWindow", value: "1m" }],
+          ),
+        });
+        expect(liveness.getThreadBackgroundLiveness("thread-1")).toBe("monitoring");
+      }),
+  );
+
+  effectIt.effect(
+    "still restarts a session with live background work when the instance changes",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const now = "2026-01-01T00:00:00.000Z";
+        const turnStart = (index: number, instanceId: string) =>
+          harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cmd-turn-start-live-instance-${index}`),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId(`user-message-live-instance-${index}`),
+              role: "user",
+              text: `turn ${index}`,
+              attachments: [],
+            },
+            modelSelection: {
+              instanceId: ProviderInstanceId.make(instanceId),
+              model: "gpt-5-codex",
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+
+        yield* turnStart(1, "codex");
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+        const liveness = harness.backgroundLiveness;
+        liveness.recordTaskLiveness({
+          threadId: "thread-1",
+          taskId: "background-agent-1",
+          taskType: undefined,
+          status: undefined,
+          kind: "started",
+        });
+
+        yield* turnStart(2, "codex_work");
+        yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 2));
+
+        expect(harness.startSession).toHaveBeenCalledTimes(2);
+        expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+          providerInstanceId: ProviderInstanceId.make("codex_work"),
+          resumeCursor: { opaque: "resume-1" },
+        });
+      }),
+  );
 
   it("restarts the provider session when runtime mode is updated on the thread", async () => {
     const harness = await createHarness();

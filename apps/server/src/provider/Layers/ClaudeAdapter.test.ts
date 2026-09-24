@@ -71,6 +71,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public readonly applyFlagSettingsCalls: Array<Record<string, unknown>> = [];
   public closeCalls = 0;
   public closeError: unknown | undefined;
 
@@ -118,6 +119,10 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   readonly setMaxThinkingTokens = async (maxThinkingTokens: number | null): Promise<void> => {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
+  };
+
+  readonly applyFlagSettings = async (settings: Record<string, unknown>): Promise<void> => {
+    this.applyFlagSettingsCalls.push(settings);
   };
 
   readonly close = (): void => {
@@ -7488,6 +7493,87 @@ describe("ClaudeAdapterLive", () => {
         `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
         SYNTHETIC_CLAUDE_CAPABLE_MODEL,
       ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("applies option changes to the running session without a new query", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const selection = (options: Parameters<typeof createModelSelection>[2]) =>
+        createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+          options,
+        );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: selection([{ id: "effort", value: "low" }]),
+        runtimeMode: "full-access",
+      });
+      const send = (options: Parameters<typeof createModelSelection>[2]) =>
+        adapter.sendTurn({
+          threadId: session.threadId,
+          input: "hello",
+          modelSelection: selection(options),
+          attachments: [],
+        });
+
+      yield* send([{ id: "effort", value: "low" }]);
+      yield* send([
+        { id: "effort", value: "max" },
+        { id: "fastMode", value: true },
+      ]);
+      yield* send([{ id: "effort", value: "ultrathink" }]);
+
+      assert.equal(harness.queries.length, 1);
+      assert.deepEqual(harness.query.applyFlagSettingsCalls, [
+        { effortLevel: "max", fastMode: true },
+        { effortLevel: "high", fastMode: null },
+      ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("turns thinking off and on in the running session", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const selection = (thinking: boolean) =>
+        createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          SYNTHETIC_CLAUDE_THINKING_MODEL,
+          [{ id: "thinking", value: thinking }],
+        );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: selection(true),
+        runtimeMode: "full-access",
+      });
+      for (const thinking of [false, true]) {
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "hello",
+          modelSelection: selection(thinking),
+          attachments: [],
+        });
+      }
+
+      assert.equal(harness.queries.length, 1);
+      assert.deepEqual(harness.query.applyFlagSettingsCalls, [
+        { alwaysThinkingEnabled: false, showThinkingSummaries: null },
+        { alwaysThinkingEnabled: true, showThinkingSummaries: true },
+      ]);
+      assert.deepEqual(harness.query.setMaxThinkingTokensCalls, [0, null]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

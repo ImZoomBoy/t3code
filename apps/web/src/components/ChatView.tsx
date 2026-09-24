@@ -441,6 +441,7 @@ import {
   shouldRetargetThreadPullRequestPanel,
   shouldOpenProactiveTurnDiff,
   shouldRenderPreviewMiniPlayer,
+  getLiveBackgroundWorkRestartWarning,
   getStartedThreadModelChangeBlockReason,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
@@ -9367,6 +9368,14 @@ export default function ChatView(props: ChatViewProps) {
         if (options?.focusComposer !== false) scheduleComposerFocus();
         return;
       }
+      const restartWarning = getLiveBackgroundWorkRestartWarning({
+        backgroundLiveness: activeThreadShell?.backgroundLiveness,
+        currentProviderInstanceId: activeThread.session?.providerInstanceId,
+        nextModelSelection,
+      });
+      if (restartWarning) {
+        toastManager.add({ type: "warning", ...restartWarning });
+      }
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,
@@ -9377,6 +9386,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     [
       activeThread,
+      activeThreadShell?.backgroundLiveness,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,

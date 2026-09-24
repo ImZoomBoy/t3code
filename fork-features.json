@@ -238,6 +238,41 @@
       "test": "apps/server/integration/orphanedProviderSessionStartup.integration.test.ts",
       "testName": "drops a deferred turn start whose environment a restart lost",
       "patchesUpstream": true
+    },
+    {
+      "name": "claude-option-change-keeps-background-work",
+      "description": "A Claude model or option change, such as the context window, no longer restarts a session that has live background work. A restart ends every background shell and agent the Claude process runs. The reactor keeps that session, and the adapter applies the change to it with setModel, applyFlagSettings and setMaxThinkingTokens. With no background work the change still restarts, as upstream does.",
+      "keep": "The backgroundLiveness condition on shouldRestartForModelSelectionChange survives in ProviderCommandReactor.ts. In ClaudeAdapter.ts these survive: ClaudeFlagSettings and its Query import, ClaudeSelectionSettings, flagOrCleared, resolveClaudeSelectionSettings, launchThinkingDisplay, applySelectionSettings, the selectionSettings context field in place of currentEffort (and the subagent effort that reads it), the applyFlagSettings member and the thinkingDisplay parameter of setMaxThinkingTokens in ClaudeQueryRuntime, and their use in startSession and sendTurn. In ProviderCommandReactor.test.ts these survive: the two tests named in testName, the backgroundLiveness harness field, ThreadBackgroundLivenessService in the runtime type, and Layer.provideMerge(ThreadBackgroundLiveness.layer) in projectionSnapshotLayer. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts",
+      "testName": "keeps a claude session with live background work when only the context window changes|still restarts a session with live background work when the instance changes",
+      "patchesUpstream": true
+    },
+    {
+      "name": "claude-option-change-keeps-background-work-adapter-tests",
+      "description": "The Claude adapter tests for claude-option-change-keeps-background-work: an option change reaches the running query without a new one. The manifest takes one test file per entry, so these tests have their own entry.",
+      "keep": "The two tests named in testName and the applyFlagSettingsCalls field and applyFlagSettings member of FakeClaudeQuery survive in ClaudeAdapter.test.ts. Everything else in that file takes upstream.",
+      "files": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts"],
+      "test": "apps/server/src/provider/Layers/ClaudeAdapter.test.ts",
+      "testName": "applies option changes to the running session without a new query|turns thinking off and on in the running session",
+      "patchesUpstream": true
+    },
+    {
+      "name": "live-background-work-restart-warning",
+      "description": "Picking a model on another provider instance while the thread has live background work shows a warning toast: the switch restarts the session on the next message and the background work stops. Web and desktop only; the mobile picker cannot switch instance in a started thread.",
+      "keep": "getLiveBackgroundWorkRestartWarning and its OrchestrationThreadShell import survive in ChatView.logic.ts, its describe block and import survive in ChatView.logic.test.ts, and its import, its toast in onProviderModelSelect and the activeThreadShell?.backgroundLiveness dependency of that callback survive in ChatView.tsx. Everything else in those files takes upstream.",
+      "files": [
+        "apps/web/src/components/ChatView.logic.ts",
+        "apps/web/src/components/ChatView.tsx",
+        "apps/web/src/components/ChatView.logic.test.ts"
+      ],
+      "test": "apps/web/src/components/ChatView.logic.test.ts",
+      "testName": "getLiveBackgroundWorkRestartWarning",
+      "patchesUpstream": true
     }
   ]
 }

@@ -820,10 +820,14 @@ const make = Effect.gen(function* () {
         activeSession?.providerInstanceId !== requestedModelSelection.instanceId;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
       const previousModelSelection = threadModelSelections.get(threadId);
+      // A restart ends every background shell and agent the Claude process
+      // runs. While any is live, the adapter applies the new model and
+      // options to the running session on the next send instead.
       const shouldRestartForModelSelectionChange =
         preferredProvider === "claudeAgent" &&
         requestedModelSelection !== undefined &&
-        !Equal.equals(previousModelSelection, requestedModelSelection);
+        !Equal.equals(previousModelSelection, requestedModelSelection) &&
+        thread.backgroundLiveness == null;
       // Only a turn that carries an environment can restart for one. A turn
       // with none leaves the live session alone, whatever it was spawned with.
       const shouldRestartForTurnEnvironment =
