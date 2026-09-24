@@ -45,7 +45,8 @@ import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
-import { makeHeldTurnEnvironments } from "../TurnEnvironment.ts";
+import { DeciderContext } from "../DeciderContext.ts";
+import { makeDeferredTurnEnvironments } from "../TurnEnvironment.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -94,9 +95,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
-  // Environments of turn starts held for a busy thread. In memory only, so
-  // they end with this engine. See `deferredTurnStarts.ts`.
-  const heldTurnEnvironments = makeHeldTurnEnvironments();
+  // Environments of deferred turn starts. In memory only, so they end with
+  // this engine. See `deferredTurnStarts.ts`.
+  const deferredTurnEnvironments = makeDeferredTurnEnvironments();
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
@@ -250,12 +251,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel: commandReadModel,
-          turnEnvironmentHeld: heldTurnEnvironments.has,
           ...(Option.isSome(userInputActivity)
             ? { userInputActivity: userInputActivity.value }
             : {}),
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
+          Effect.provideService(DeciderContext, {
+            hasDeferredTurnEnvironment: deferredTurnEnvironments.has,
+          }),
           Effect.mapError((cause) =>
             isOrchestrationCommandRejection(cause)
               ? cause
@@ -333,7 +336,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         // events it reacts to go out. The events carry no environment, so this
         // is the only way it reaches the spawn. Parked after the commit, so a
         // refused command leaves nothing behind.
-        yield* heldTurnEnvironments.remember(envelope.command, committedCommand.committedEvents);
+        yield* deferredTurnEnvironments.remember(
+          envelope.command,
+          committedCommand.committedEvents,
+        );
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {

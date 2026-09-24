@@ -8,9 +8,8 @@
  * takes it when it handles that command's `thread.turn-start-requested`.
  * Taking removes it, so a later turn on the same thread never inherits it.
  *
- * A turn start that waits for a busy thread is held instead, by the engine
- * that holds the start, until the start runs or is dropped. See
- * `makeHeldTurnEnvironments`.
+ * A deferred turn start's environment waits with the engine instead, until
+ * the start runs or is dropped. See `makeDeferredTurnEnvironments`.
  *
  * @module TurnEnvironment
  */
@@ -29,7 +28,7 @@ const MAX_PARKED_TURN_ENVIRONMENTS = 256;
 
 const environmentsByCommandId = new Map<CommandId, ProviderInstanceEnvironment>();
 
-export const rememberTurnEnvironment = Effect.fnUntraced(function* (command: OrchestrationCommand) {
+const rememberTurnEnvironment = Effect.fnUntraced(function* (command: OrchestrationCommand) {
   if (command.type !== "thread.turn.start" || command.environment === undefined) {
     return;
   }
@@ -56,24 +55,19 @@ const parkTurnEnvironment = Effect.fnUntraced(function* (
 });
 
 /**
- * The environments of turn starts held for a busy thread, owned by one
- * engine. They live exactly as long as that engine's process, which is what
- * makes a held start that outlived a restart lose its environment: the decider
- * asks `has` before it runs one, and drops it with `environment-lost` when
- * the answer is no.
+ * The environments of deferred turn starts, owned by one engine. They live
+ * exactly as long as that engine, so after a restart `has` is false and the
+ * decider drops the start with `environment-lost`.
  *
- * No cap: every held start is removed by the event that runs or drops it.
+ * No cap: every entry is removed by the event that runs or drops its start.
  */
-export function makeHeldTurnEnvironments() {
-  const held = new Map<CommandId, ProviderInstanceEnvironment>();
+export function makeDeferredTurnEnvironments() {
+  const deferred = new Map<CommandId, ProviderInstanceEnvironment>();
   return {
-    has: (commandId: CommandId): boolean => held.has(commandId),
+    has: (commandId: CommandId): boolean => deferred.has(commandId),
     /**
-     * Takes one committed command and the events it wrote. A turn start that
-     * ran at once parks its environment, as a direct start does. One that was
-     * held keeps it here. A held start that ran parks its environment under its
-     * own command id, which is the id its `thread.turn-start-requested` carries,
-     * and one that was dropped lets its environment go.
+     * Call once per committed command, with the events it wrote, before they
+     * are published, so the provider reactor finds every environment it needs.
      */
     remember: Effect.fnUntraced(function* (
       command: OrchestrationCommand,
@@ -82,12 +76,12 @@ export function makeHeldTurnEnvironments() {
       for (const event of committedEvents) {
         if (event.commandId === null) continue;
         if (event.type === "thread.turn-start-requested") {
-          const environment = held.get(event.commandId);
+          const environment = deferred.get(event.commandId);
           if (environment === undefined) continue;
-          held.delete(event.commandId);
+          deferred.delete(event.commandId);
           yield* parkTurnEnvironment(event.commandId, environment);
         } else if (event.type === "thread.deferred-turn-start-dropped") {
-          held.delete(event.commandId);
+          deferred.delete(event.commandId);
         }
       }
       if (
@@ -95,7 +89,7 @@ export function makeHeldTurnEnvironments() {
         command.environment !== undefined &&
         committedEvents.some((event) => event.type === "thread.turn-start-deferred")
       ) {
-        held.set(command.commandId, command.environment);
+        deferred.set(command.commandId, command.environment);
         return;
       }
       yield* rememberTurnEnvironment(command);

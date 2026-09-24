@@ -731,7 +731,7 @@ it.effect("drops a deferred turn start whose environment a restart lost", () =>
       // carried one is dropped rather than started without it.
       withEnvironment: ["thread.turn-start-deferred", "thread.deferred-turn-start-dropped"],
       droppedReason: "environment-lost",
-      // The held start records that it had an environment, never its value.
+      // The deferred turn start records that it had an environment, never its value.
       recordedEnvironment: true,
       // The wake behind it does not wait on the dropped one.
       withoutEnvironment: [

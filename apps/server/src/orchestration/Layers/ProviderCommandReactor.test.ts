@@ -3372,10 +3372,10 @@ describe("ProviderCommandReactor", () => {
 
   /**
    * The supervisor's wake carries an environment and asks to wait for a busy
-   * thread. The server holds it, and when the running turn ends the session
+   * thread. The server defers it, and when the running turn ends the session
    * spawned for it gets the environment, as a direct start's session does.
    */
-  effectIt.effect("a held turn start spawns its session with its environment", () =>
+  effectIt.effect("a deferred turn start spawns its session with its environment", () =>
     Effect.gen(function* () {
       const harness = yield* Effect.promise(() => createHarness());
       const turnEnvironment = decodeProviderEnvironment([
@@ -3384,7 +3384,7 @@ describe("ProviderCommandReactor", () => {
       ]);
 
       // A turn runs with no provider process live for this reactor, so the
-      // held start has to spawn one when it runs.
+      // deferred turn start has to spawn one when it runs.
       yield* setThreadTurnRunning({ harness, running: true });
       yield* dispatchTurn({ harness, ordinal: 1, environment: turnEnvironment, whenBusy: "queue" });
       yield* Effect.promise(() => harness.drain());
@@ -3418,10 +3418,10 @@ describe("ProviderCommandReactor", () => {
 
   /**
    * The live session was spawned by the person's turn, without the wake's
-   * environment. The held wake restarts it with the environment when it runs,
+   * environment. The deferred wake restarts it with the environment when it runs,
    * as a direct start with an environment would.
    */
-  effectIt.effect("a held turn start restarts a live session for its environment", () =>
+  effectIt.effect("a deferred turn start restarts a live session for its environment", () =>
     Effect.gen(function* () {
       const harness = yield* Effect.promise(() => createHarness());
       const turnEnvironment = decodeProviderEnvironment([

@@ -49,7 +49,6 @@ import {
 import {
   deferTurnStartIfBusy,
   followDeferredTurnStarts,
-  type TurnEnvironmentHeld,
   releaseDeferredTurnStart,
   threadIsFree,
 } from "./deferredTurnStarts.ts";
@@ -221,11 +220,9 @@ type DecideOrchestrationCommandResult =
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   commands,
   readModel,
-  turnEnvironmentHeld,
 }: {
   readonly commands: ReadonlyArray<OrchestrationCommand>;
   readonly readModel: OrchestrationReadModel;
-  readonly turnEnvironmentHeld: TurnEnvironmentHeld;
 }): Effect.fn.Return<
   ReadonlyArray<PlannedOrchestrationEvent>,
   OrchestrationCommandRejection | PlatformError.PlatformError,
@@ -239,7 +236,6 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
     const decided = yield* decideOrchestrationCommand({
       command: nextCommand,
       readModel: nextReadModel,
-      turnEnvironmentHeld,
     });
     const nextEvents = Array.isArray(decided) ? decided : [decided];
     for (const nextEvent of nextEvents) {
@@ -259,15 +255,10 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
   command,
   readModel,
   userInputActivity,
-  turnEnvironmentHeld = () => false,
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
   readonly userInputActivity?: OrchestrationThreadActivity;
-  // The engine's in-memory environments of deferred turn starts. Absent means
-  // none is held, so a deferred start that had one is dropped, never run
-  // without it. See `deferredTurnStarts.ts`.
-  readonly turnEnvironmentHeld?: TurnEnvironmentHeld;
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
   OrchestrationCommandRejection | PlatformError.PlatformError,
@@ -423,7 +414,6 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
       if (activeThreads.length > 0) {
         return yield* decideCommandSequence({
           readModel,
-          turnEnvironmentHeld,
           commands: [
             ...activeThreads.map(
               (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
@@ -1057,7 +1047,6 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
         );
         return yield* decideCommandSequence({
           readModel,
-          turnEnvironmentHeld,
           commands: [
             ...(hasMetadata ? [metadata] : []),
             ...(currentPullRequest?.source === "manual"
@@ -1091,7 +1080,6 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
         );
         return yield* decideCommandSequence({
           readModel,
-          turnEnvironmentHeld,
           commands: [
             ...(hasMetadata ? [metadata] : []),
             {
@@ -1670,7 +1658,6 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
         now: yield* nowIso,
         decide: (turnStart, model) => decideCommand({ command: turnStart, readModel: model }),
         eventBase: withEventBase,
-        turnEnvironmentHeld,
       });
     }
 
@@ -1836,7 +1823,6 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
         // steers a running agent or resumes an idle session.
         return yield* decideCommandSequence({
           readModel,
-          turnEnvironmentHeld,
           commands: [
             {
               type: "thread.activity.append",
@@ -1899,7 +1885,6 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
       if (attachments.length === 0) return responseEvent;
       const historyEvent = yield* decideOrchestrationCommand({
         readModel,
-        turnEnvironmentHeld,
         command: {
           type: "thread.activity.append",
           commandId: command.commandId,
@@ -2401,7 +2386,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     decide: (command, readModel) => decideCommand({ command, readModel }),
     project: projectEvent,
     eventBase: withEventBase,
-    turnEnvironmentHeld: input.turnEnvironmentHeld ?? (() => false),
   });
   return followed === null || followed.length === 0 ? decided : [...planned, ...followed];
 });

@@ -4974,7 +4974,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   );
 
   it.effect(
-    "advertises a queued turn start that keeps its environment on both descriptor paths",
+    "advertises a deferred turn start that keeps its environment on both descriptor paths",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;

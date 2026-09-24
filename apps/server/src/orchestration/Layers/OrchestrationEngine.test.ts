@@ -2569,16 +2569,18 @@ describe("turn starts that wait for an idle thread", () => {
     }
   });
 
-  const wakeEnvironment = [{ name: "FM_HOME", value: "/tmp/fm-held", sensitive: false }];
+  const wakeEnvironment = [{ name: "FM_HOME", value: "/tmp/fm-deferred", sensitive: false }];
 
-  it("holds a waiting turn start that carries an environment and starts it when free", async () => {
+  it("defers a turn start that carries an environment and starts it when free", async () => {
     const system = await seededThread("running");
     try {
       await dispatch(system, queueWake({ environment: wakeEnvironment }));
-      const [held] = await eventsFor(system, "wake");
-      // The held start records that it had an environment, never its value.
-      expect(held?.type === "thread.turn-start-deferred" && held.payload.hasEnvironment).toBe(true);
-      expect(JSON.stringify(held)).not.toContain("/tmp/fm-held");
+      const [deferred] = await eventsFor(system, "wake");
+      // The deferred turn start records that it had an environment, never its value.
+      expect(
+        deferred?.type === "thread.turn-start-deferred" && deferred.payload.hasEnvironment,
+      ).toBe(true);
+      expect(JSON.stringify(deferred)).not.toContain("/tmp/fm-deferred");
 
       await dispatch(system, setSession("idle", "ready"));
       expect(await typesFor(system, "wake")).toEqual([
@@ -2591,7 +2593,7 @@ describe("turn starts that wait for an idle thread", () => {
     }
   });
 
-  it("after a restart, drops a held start whose environment died with the process", async () => {
+  it("after a restart, drops a deferred turn start whose environment died with the process", async () => {
     const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-deferred-turn-"));
     const databasePath = NodePath.join(directory, "state.sqlite");
     let system = await seededThread("running", databasePath);
@@ -2615,6 +2617,26 @@ describe("turn starts that wait for an idle thread", () => {
     } finally {
       await system.dispose();
       await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  // A start without `whenBusy` steers as it always has, environment or not.
+  it("does not defer a turn start that carries an environment without whenBusy", async () => {
+    const system = await seededThread("running");
+    try {
+      await dispatch(system, turnStart("steer", { environment: wakeEnvironment }));
+      expect(await typesFor(system, "steer")).toEqual([
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      // Nothing waits, so the thread going idle starts nothing more.
+      await dispatch(system, setSession("idle-after-steer", "ready"));
+      expect(await typesFor(system, "steer")).toEqual([
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+    } finally {
+      await system.dispose();
     }
   });
 });

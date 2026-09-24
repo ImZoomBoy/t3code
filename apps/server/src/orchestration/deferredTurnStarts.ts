@@ -19,11 +19,11 @@
  * `pendingTurnStart` is not persisted: after a restart the provider reactor
  * sends `thread.deferred-turn-start.release` for threads that are free.
  *
- * A start may carry an environment. The engine keeps it in memory beside the
- * held start, never on an event, and hands it to the provider reactor when the
- * start runs, exactly as for a direct start. The held start records only that
- * it had one, so a start whose environment died with a restart is dropped
- * with `environment-lost` when it would run, rather than run without it.
+ * A deferred turn start may carry an environment. The engine keeps it in
+ * memory, never on an event, and hands it to the provider reactor when the
+ * start runs, exactly as for a direct start. The deferred turn start records
+ * only that it had one, so one whose environment died with a restart is
+ * dropped with `environment-lost` when it would run, rather than run without it.
  *
  * @module deferredTurnStarts
  */
@@ -42,6 +42,7 @@ import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
+import { DeciderContext } from "./DeciderContext.ts";
 import type { OrchestrationCommandRejection, OrchestrationProjectorDecodeError } from "./Errors.ts";
 
 type PlannedEvent = Omit<OrchestrationEvent, "sequence">;
@@ -71,12 +72,6 @@ type Decide = (
   OrchestrationCommandRejection | PlatformError.PlatformError,
   Crypto.Crypto
 >;
-
-/**
- * Whether the server still holds the environment of the deferred start sent
- * under this command id. It is false for every start after a restart.
- */
-export type TurnEnvironmentHeld = (commandId: CommandId) => boolean;
 
 type Project = (
   readModel: OrchestrationReadModel,
@@ -259,7 +254,7 @@ const dropEvents = Effect.fn("dropDeferredTurnStarts")(function* (input: {
 /**
  * Starts the oldest deferred start on a free thread, as the `thread.turn.start`
  * it was sent as. One that the decider now refuses, or whose environment the
- * server no longer holds, is dropped, and the next is tried, so a dropped start
+ * engine no longer holds, is dropped, and the next is tried, so a dropped start
  * never leaves the rest waiting on a free thread.
  */
 export const releaseDeferredTurnStart = Effect.fn("releaseDeferredTurnStart")(function* (input: {
@@ -268,12 +263,18 @@ export const releaseDeferredTurnStart = Effect.fn("releaseDeferredTurnStart")(fu
   readonly now: string;
   readonly decide: Decide;
   readonly eventBase: EventBase;
-  readonly turnEnvironmentHeld: TurnEnvironmentHeld;
 }) {
   const { thread, now } = input;
+  // Signed-off exception to "orchestration stays pure": this asks the engine's
+  // memory whether it still holds the environment. The environment can hold
+  // secrets, so it can never be stored on an event or in a table, and memory is
+  // the only place it can be. So the same command and read model decide
+  // differently after a restart: the start is dropped rather than run without
+  // its environment.
+  const { hasDeferredTurnEnvironment } = yield* DeciderContext;
   const dropped: PlannedEvent[] = [];
   for (const deferred of thread.deferredTurnStarts ?? []) {
-    if (deferred.hasEnvironment === true && !input.turnEnvironmentHeld(deferred.commandId)) {
+    if (deferred.hasEnvironment === true && !hasDeferredTurnEnvironment(deferred.commandId)) {
       dropped.push(
         ...(yield* dropEvents({
           threadId: thread.id,
@@ -373,7 +374,6 @@ export const followDeferredTurnStarts = Effect.fn("followDeferredTurnStarts")(fu
   readonly decide: Decide;
   readonly project: Project;
   readonly eventBase: EventBase;
-  readonly turnEnvironmentHeld: TurnEnvironmentHeld;
 }) {
   const { command, planned, now } = input;
   // A turn start decides for itself whether to wait; the release command
@@ -413,7 +413,6 @@ export const followDeferredTurnStarts = Effect.fn("followDeferredTurnStarts")(fu
         now,
         decide: input.decide,
         eventBase: input.eventBase,
-        turnEnvironmentHeld: input.turnEnvironmentHeld,
       });
     }
   }
