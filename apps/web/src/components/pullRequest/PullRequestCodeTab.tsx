@@ -3,6 +3,7 @@ import type { CodeViewDiffItem, CodeViewHandle } from "@pierre/diffs/react";
 import type {
   EnvironmentId,
   PullRequestDetailView,
+  PullRequestDiffResult,
   PullRequestDiffSide,
   PullRequestOmittedFileStat,
   PullRequestRef,
@@ -24,8 +25,10 @@ import {
   TextWrapIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useAtomRefresh } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { AsyncResult, type Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -131,6 +134,91 @@ const REPLACE_FILE_COUNTS_CSS = `
 
 /** Nothing loaded yet, as one identity, so the memos below do not see a new array every render. */
 const NO_SLICES: ReadonlyArray<DiffSlice> = [];
+
+/** The loaded slices, the pull request and scope they belong to, and the slice asked for last. */
+interface SliceState {
+  readonly key: string;
+  readonly cursor: string | null;
+  readonly slices: ReadonlyArray<DiffSlice>;
+}
+
+function isSameDiffSlice(existing: DiffSlice, next: DiffSlice): boolean {
+  return (
+    existing.patch === next.patch &&
+    existing.truncated === next.truncated &&
+    existing.nextCursor === next.nextCursor &&
+    existing.omittedFileStats.length === next.omittedFileStats.length &&
+    existing.omittedFileStats.every((file, index) => {
+      const refreshed = next.omittedFileStats[index];
+      return (
+        refreshed !== undefined &&
+        refreshed.path === file.path &&
+        refreshed.additions === file.additions &&
+        refreshed.deletions === file.deletions
+      );
+    })
+  );
+}
+
+/**
+ * Takes one answer into the loaded slices. Only the slice asked for last may be added. An answer
+ * for any other slice can only replace it: a slice that is not loaded and not asked for was
+ * dropped, and its answer arrived late.
+ */
+function receiveDiffSlice(previous: SliceState, scopeKey: string, next: DiffSlice): SliceState {
+  const isCurrentScope = previous.key === scopeKey;
+  const slices = isCurrentScope ? previous.slices : NO_SLICES;
+  const index = slices.findIndex((slice) => slice.cursor === next.cursor);
+  if (index === -1) {
+    const askedFor = isCurrentScope ? previous.cursor : null;
+    return askedFor === next.cursor
+      ? { key: scopeKey, cursor: next.cursor, slices: [...slices, next] }
+      : previous;
+  }
+  const existing = slices[index];
+  if (existing === undefined || isSameDiffSlice(existing, next)) {
+    return previous;
+  }
+  // A slice that came back different means the diff moved under the review. While it still ends
+  // where it did, the slices after it start where they did too, and are kept: every loaded slice
+  // is re-read together, so each brings its own answer.
+  if (existing.nextCursor === next.nextCursor) {
+    return { ...previous, slices: slices.map((slice, at) => (at === index ? next : slice)) };
+  }
+  // Otherwise the slices after it go with the replacement: their cursors were positions in the
+  // old diff. Reading on resumes from the replacement.
+  return { key: scopeKey, cursor: next.cursor, slices: [...slices.slice(0, index), next] };
+}
+
+function toDiffSlice(cursor: string | null, data: PullRequestDiffResult): DiffSlice {
+  return {
+    cursor,
+    patch: data.patch,
+    truncated: data.truncated,
+    nextCursor: data.nextCursor,
+    omittedFileStats: data.omittedFileStats ?? [],
+  };
+}
+
+/**
+ * Keeps one loaded slice's read mounted and hands its answers back. A reconnect re-runs every
+ * mounted read, so this is what brings a slice the reader has already scrolled past up to date.
+ */
+function DiffSliceRead({
+  atom,
+  cursor,
+  onAnswer,
+}: {
+  readonly atom: Atom.Atom<AsyncResult.AsyncResult<PullRequestDiffResult, unknown>>;
+  readonly cursor: string | null;
+  readonly onAnswer: (cursor: string | null, data: PullRequestDiffResult) => void;
+}) {
+  const data = Option.getOrNull(AsyncResult.value(useAtomValue(atom)));
+  useEffect(() => {
+    if (data !== null) onAnswer(cursor, data);
+  }, [cursor, data, onAnswer]);
+  return null;
+}
 
 /** A group while it is still gathering what belongs on its line. */
 interface MutableAnnotationGroup {
@@ -248,11 +336,11 @@ function PullRequestCodeTab({
   const [orphansOpen, setOrphansOpen] = useState(false);
   // Which pull request the slices belong to travels with them, so a render taken before the
   // reset below cannot read the previous one's slices — or send its cursor to the host.
-  const [sliceState, setSliceState] = useState<{
-    readonly key: string;
-    readonly cursor: string | null;
-    readonly slices: ReadonlyArray<DiffSlice>;
-  }>({ key: "", cursor: null, slices: NO_SLICES });
+  const [sliceState, setSliceState] = useState<SliceState>({
+    key: "",
+    cursor: null,
+    slices: NO_SLICES,
+  });
   const parseCache = useRef(new Map<string, RenderablePatch>());
   const [viewer, setViewer] = useState<CodeViewHandle<ReviewAnnotationGroup> | null>(null);
 
@@ -276,66 +364,36 @@ function PullRequestCodeTab({
 
   const loadedSlices = sliceState.key === scopeKey ? sliceState.slices : NO_SLICES;
   const cursor = sliceState.key === scopeKey ? sliceState.cursor : null;
-  const diffQuery = useEnvironmentQuery(
-    pullRequestEnvironment.diff({
-      environmentId,
-      input: {
-        ...reference,
-        ...(cursor === null ? {} : { cursor }),
-        ...(commit === null ? {} : { commit }),
-      },
-    }),
+  // One place builds a slice's read, so the slice asked for and the slices already loaded share
+  // the same read rather than each starting its own.
+  const diffSliceAtom = useCallback(
+    (sliceCursor: string | null) =>
+      pullRequestEnvironment.diff({
+        environmentId,
+        input: {
+          ...reference,
+          ...(sliceCursor === null ? {} : { cursor: sliceCursor }),
+          ...(commit === null ? {} : { commit }),
+        },
+      }),
+    [commit, environmentId, reference],
   );
+  const diffQuery = useEnvironmentQuery(diffSliceAtom(cursor));
   // Each answer is kept as its own slice. Concatenating the patches and re-parsing the growing
   // text would cost more with every slice, which is the wall the slicing exists to remove.
+  const receiveSlice = useCallback(
+    (sliceCursor: string | null, data: PullRequestDiffResult) =>
+      setSliceState((previous) =>
+        receiveDiffSlice(previous, scopeKey, toDiffSlice(sliceCursor, data)),
+      ),
+    [scopeKey],
+  );
   useEffect(() => {
-    const data = diffQuery.data;
-    if (data === null) return;
-    setSliceState((previous) => {
-      const slices = previous.key === scopeKey ? previous.slices : NO_SLICES;
-      const next = {
-        cursor,
-        patch: data.patch,
-        truncated: data.truncated,
-        nextCursor: data.nextCursor,
-        omittedFileStats: data.omittedFileStats ?? [],
-      };
-      const index = slices.findIndex((slice) => slice.cursor === cursor);
-      if (index === -1) {
-        return { key: scopeKey, cursor, slices: [...slices, next] };
-      }
-      const existing = slices[index];
-      if (
-        existing !== undefined &&
-        existing.patch === next.patch &&
-        existing.truncated === next.truncated &&
-        existing.nextCursor === next.nextCursor &&
-        existing.omittedFileStats.length === next.omittedFileStats.length &&
-        existing.omittedFileStats.every((file, index) => {
-          const refreshed = next.omittedFileStats[index];
-          return (
-            refreshed !== undefined &&
-            refreshed.path === file.path &&
-            refreshed.additions === file.additions &&
-            refreshed.deletions === file.deletions
-          );
-        })
-      ) {
-        return previous;
-      }
-      // A page that came back different means the diff moved under the review. The slices
-      // after it go with the replacement: their cursors were positions in the old diff.
-      return { key: scopeKey, cursor, slices: [...slices.slice(0, index), next] };
-    });
-  }, [cursor, diffQuery.data, scopeKey]);
+    if (diffQuery.data !== null) receiveSlice(cursor, diffQuery.data);
+  }, [cursor, diffQuery.data, receiveSlice]);
   // The refresh button rereads from the first page rather than the page the reader is on:
   // pages are positions in one snapshot of the diff, and a fresh snapshot starts over.
-  const refreshFirstDiffPage = useAtomRefresh(
-    pullRequestEnvironment.diff({
-      environmentId,
-      input: { ...reference, ...(commit === null ? {} : { commit }) },
-    }),
-  );
+  const refreshFirstDiffPage = useAtomRefresh(diffSliceAtom(null));
   const reviewKey = referenceKey;
   const pendingComments = usePendingReviewComments(reference);
   const addComment = usePullRequestReviewStore((store) => store.addComment);
@@ -1403,6 +1461,14 @@ function PullRequestCodeTab({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {loadedSlices.map((slice) => (
+        <DiffSliceRead
+          key={slice.cursor ?? ""}
+          atom={diffSliceAtom(slice.cursor)}
+          cursor={slice.cursor}
+          onAnswer={receiveSlice}
+        />
+      ))}
       {toolbar}
       {/* Above the code, closed, and counted: these belong to the change rather than to any
             line of it, and in the stream they read as cards dropped into the patch. */}
