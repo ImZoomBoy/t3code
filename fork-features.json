@@ -242,7 +242,7 @@
     {
       "name": "fm-turn-start-when-busy-ended-session",
       "description": "A thread whose session ended (stopped, interrupted or error) with no active turn counts as free for a turn start that asks to queue, so the start runs at once instead of waiting for an event that never comes. A start an older server deferred on such a thread runs at the next startup, through the startup release loop.",
-      "keep": "deferredTurnStarts.ts is ours whole, including the rule in threadIsFree that counts a stopped, interrupted or errored session with no active turn as free.",
+      "keep": "deferredTurnStarts.ts is ours whole, including the rule in threadIsFree that counts a stopped, interrupted or errored session with no active turn as free. Upstream has no file at that path, so nothing in it takes upstream.",
       "files": ["apps/server/src/orchestration/deferredTurnStarts.ts"],
       "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
       "testName": "a turn start that asks to queue runs at once on a thread whose session stopped",
