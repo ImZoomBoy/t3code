@@ -238,6 +238,24 @@
       "test": "apps/server/integration/orphanedProviderSessionStartup.integration.test.ts",
       "testName": "drops a deferred turn start whose environment a restart lost",
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy-ended-session",
+      "description": "A thread whose session ended (stopped, interrupted or error) with no active turn counts as free for a turn start that asks to queue, so the start runs at once instead of waiting for an event that never comes. A start an older server deferred on such a thread runs at the next startup, through the startup release loop.",
+      "keep": "deferredTurnStarts.ts is ours whole, including the rule in threadIsFree that counts a stopped, interrupted or errored session with no active turn as free.",
+      "files": ["apps/server/src/orchestration/deferredTurnStarts.ts"],
+      "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
+      "testName": "a turn start that asks to queue runs at once on a thread whose session stopped",
+      "patchesUpstream": false
+    },
+    {
+      "name": "fm-turn-start-when-busy-ended-session-restart-test",
+      "description": "The startup test for fm-turn-start-when-busy-ended-session: a turn start deferred on a stopped session before a restart runs after it. The manifest takes one test file per entry, so this test has its own entry.",
+      "keep": "The test named in testName survives in orphanedProviderSessionStartup.integration.test.ts. Everything else in that file takes upstream.",
+      "files": ["apps/server/integration/orphanedProviderSessionStartup.integration.test.ts"],
+      "test": "apps/server/integration/orphanedProviderSessionStartup.integration.test.ts",
+      "testName": "starts a turn start deferred on a stopped session after a restart",
+      "patchesUpstream": true
     }
   ]
 }

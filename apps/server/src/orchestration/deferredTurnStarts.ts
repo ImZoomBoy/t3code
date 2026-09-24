@@ -78,13 +78,30 @@ type Project = (
   event: OrchestrationEvent,
 ) => Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError>;
 
-/** No turn is running or starting and none has been asked for. */
+/**
+ * No turn is running or starting and none has been asked for. A session that
+ * ended (`stopped`, `interrupted`, `error`) runs no turn, so its thread is free
+ * unless it still names an active turn; a turn start there starts a new
+ * session, as a direct send does.
+ */
 export function threadIsFree(thread: OrchestrationThread): boolean {
-  const status = thread.session?.status;
-  return (
-    (status === undefined || status === "ready" || status === "idle") &&
-    (thread.pendingTurnStart ?? null) === null
-  );
+  const session = thread.session ?? null;
+  const sessionIsFree = (() => {
+    if (session === null) return true;
+    switch (session.status) {
+      case "idle":
+      case "ready":
+        return true;
+      case "stopped":
+      case "interrupted":
+      case "error":
+        return session.activeTurnId === null;
+      case "starting":
+      case "running":
+        return false;
+    }
+  })();
+  return sessionIsFree && (thread.pendingTurnStart ?? null) === null;
 }
 
 /** A start that asks to queue waits behind anything busy and behind earlier waiting starts. */

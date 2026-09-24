@@ -335,6 +335,44 @@ it.live("a turn start that asks to queue runs at once on an idle thread", () =>
   ),
 );
 
+it.live("a turn start that asks to queue runs at once on a thread whose session stopped", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+      // A restart or the idle reaper leaves the session stopped with no turn.
+      const stoppedAt = liveNow();
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-stopped"),
+        threadId: THREAD_ID,
+        session: {
+          threadId: THREAD_ID,
+          status: "stopped",
+          providerName: PROVIDER,
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: stoppedAt,
+        },
+        createdAt: stoppedAt,
+      });
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession(turnResponse("wake reply"));
+
+      const idle = yield* watchEvents(harness, isSessionStatus("ready"));
+      yield* startTurn(harness, { id: "wake", text: "wake message", whenBusy: "queue" });
+      assert.deepEqual(yield* eventTypesFor(harness, "cmd-wake"), [
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      yield* harness.adapterHarness!.awaitSends(THREAD_ID, 1);
+      assert.deepEqual(inputsOf(harness.adapterHarness!.getTurnInputs(THREAD_ID)), [
+        "wake message",
+      ]);
+      yield* Fiber.join(idle);
+    }),
+  ),
+);
+
 it.live("a turn start that does not ask to wait still steers into the running turn", () =>
   withHarness((harness) =>
     Effect.gen(function* () {

@@ -3,6 +3,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EnvironmentId,
+  EventId,
   MessageId,
   ProjectId,
   ProviderDriverKind,
@@ -34,6 +35,7 @@ import * as Keybindings from "../src/keybindings.ts";
 import { OrchestrationLayerLive } from "../src/orchestration/runtimeLayer.ts";
 import * as OrchestrationEngine from "../src/orchestration/Services/OrchestrationEngine.ts";
 import * as OrchestrationReactor from "../src/orchestration/Services/OrchestrationReactor.ts";
+import * as OrchestrationEventStore from "../src/persistence/Services/OrchestrationEventStore.ts";
 import * as ProjectionSnapshotQuery from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../src/persistence/ProviderSessionRuntime.ts";
@@ -746,6 +748,114 @@ it.effect("drops a deferred turn start whose environment a restart lost", () =>
     Effect.provide(
       ServerConfig.layerTest(process.cwd(), {
         prefix: "t3-startup-deferred-turn-start-environment-",
+      }).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+  ),
+);
+
+it.effect("starts a turn start deferred on a stopped session after a restart", () =>
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const createdAt = DateTime.formatIso(yield* DateTime.now);
+    const stoppedThreadId = ThreadId.make("thread-deferred-on-stopped-session");
+
+    yield* Effect.gen(function* () {
+      const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const eventStore = yield* OrchestrationEventStore.OrchestrationEventStore;
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("command-create-project"),
+        projectId,
+        title: "Deferred turn start on a stopped session",
+        workspaceRoot: "/tmp/startup-deferred-stopped-project",
+        defaultModelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("command-create-thread"),
+        threadId: stoppedThreadId,
+        projectId,
+        title: "Deferred turn start on a stopped session",
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("command-session-stopped"),
+        threadId: stoppedThreadId,
+        session: {
+          threadId: stoppedThreadId,
+          status: "stopped",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+      // A server that did not count a stopped session as free deferred the
+      // wake here, and no later event would have released it.
+      yield* eventStore.append({
+        type: "thread.turn-start-deferred",
+        eventId: EventId.make("event-wake-deferred-on-stopped"),
+        aggregateKind: "thread",
+        aggregateId: stoppedThreadId,
+        occurredAt: createdAt,
+        commandId: CommandId.make("wake-on-stopped"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          threadId: stoppedThreadId,
+          commandId: CommandId.make("wake-on-stopped"),
+          message: {
+            messageId: MessageId.make("message-wake-on-stopped"),
+            role: "user",
+            text: "wake",
+            attachments: [],
+          },
+          deferredAt: createdAt,
+        },
+      });
+    }).pipe(Effect.provide(makePersistedRuntimeLayer(config.dbPath)));
+
+    const startupLayer = ServerRuntimeStartup.layer.pipe(
+      Layer.provideMerge(makePersistedRuntimeLayer(config.dbPath)),
+      Layer.provideMerge(startupDependencies),
+    );
+    const result = yield* Effect.gen(function* () {
+      const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+      const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* startup.markHttpListening;
+      yield* startup.awaitCommandReady;
+      const events = Array.from(yield* Stream.runCollect(engine.readEvents(0)));
+      const deferredRows = yield* sql<{ readonly turnStartJson: string }>`
+        SELECT turn_start_json AS "turnStartJson"
+        FROM projection_thread_deferred_turn_starts
+      `;
+      return {
+        wake: events
+          .filter((event) => event.commandId === "wake-on-stopped")
+          .map((event) => event.type),
+        remainingDeferredRows: deferredRows.length,
+      };
+    }).pipe(Effect.provide(startupLayer));
+
+    assert.deepStrictEqual(result, {
+      wake: ["thread.turn-start-deferred", "thread.message-sent", "thread.turn-start-requested"],
+      remainingDeferredRows: 0,
+    });
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3-startup-deferred-turn-start-stopped-",
       }).pipe(Layer.provideMerge(NodeServices.layer)),
     ),
   ),
