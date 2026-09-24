@@ -168,6 +168,8 @@ import {
   prototypeEffortLabel,
   prototypeFoldStartsOpen,
   prototypeMockProject,
+  type PrototypeLook,
+  PrototypeRoleIcon,
   prototypeProjectTextClassName,
   prototypeRoleClassName,
   prototypeRoleWord,
@@ -999,6 +1001,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         readonly fold?: { readonly expanded: boolean; readonly onToggle: () => void } | undefined;
         readonly note?: string | undefined;
         readonly accent?: "fixed" | "project" | undefined;
+        readonly look?: PrototypeLook | undefined;
+        readonly tone?: string | undefined;
+        readonly main?: boolean | undefined;
         readonly onTogglePin?: (() => void) | undefined;
       }
     | undefined;
@@ -1247,6 +1252,35 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const prototypeEffort = prototypeFleet?.accent
     ? prototypeEffortLabel(thread.modelSelection)
     : null;
+  // N2d to N2h: each main thread's colour, faded on its workers.
+  const prototypeLook = prototypeFleet?.look;
+  const prototypeTone = prototypeLook
+    ? cn(prototypeFleet?.tone, !prototypeFleet?.main && "opacity-70")
+    : undefined;
+  const prototypeMainWeight =
+    prototypeLook && prototypeFleet?.main ? prototypeLook.mainWeight : undefined;
+  const prototypeTitleClass =
+    prototypeLook &&
+    (prototypeLook.target === "title" ||
+      prototypeLook.target === "title-role" ||
+      prototypeLook.target === "row")
+      ? cn(prototypeTone, prototypeMainWeight)
+      : undefined;
+  const prototypeRoleClass = prototypeLook
+    ? cn(
+        prototypeLook.target !== "title" && prototypeTone,
+        (prototypeLook.target === "role" || prototypeLook.target === "title-role") &&
+          prototypeMainWeight,
+      )
+    : undefined;
+  const prototypeRowClass = prototypeLook?.target === "row" ? prototypeTone : undefined;
+  const prototypeIcon = prototypeLook ? (
+    <PrototypeRoleIcon
+      set={prototypeLook.icons}
+      role={thread.fleetRole}
+      className={cn("size-3.5 shrink-0", prototypeFleet?.tone)}
+    />
+  ) : null;
   const displayTitle = threadDisplayTitle(thread);
 
   // The local environment is "this machine" and needs no marker; every other
@@ -1535,6 +1569,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     : "text-secondary-label/70",
             ),
         isRegeneratingTitle && "opacity-[0.55]",
+        prototypeTitleClass,
       )}
     >
       {displayTitle}
@@ -1878,9 +1913,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </>
               ) : (
                 <>
-                  {props.project ? (
+                  {prototypeIcon && prototypeLook?.placement === "replace" ? (
+                    prototypeIcon
+                  ) : props.project ? (
                     <ProjectFavicon project={props.project} className="size-4 shrink-0" />
                   ) : null}
+                  {prototypeLook?.placement === "beside" ? prototypeIcon : null}
                   {/* A second mate's label already names its repository, so it
                       stands in for the project name rather than crowding it. */}
                   {props.projectDisplayName &&
@@ -1888,6 +1926,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     <span
                       className={cn(
                         "truncate text-secondary-label text-xs",
+                        prototypeRowClass,
                         // Beside a role label the project name keeps its width
                         // up to a cap, and the label gives way first.
                         roleBadge === null ? "min-w-0 flex-1" : "max-w-[45%] shrink-0",
@@ -2067,17 +2106,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {readOnlyModelBadges === null ? (
                 <span
                   data-testid={`sidebar-model-${thread.id}`}
-                  className="shrink-0 whitespace-nowrap text-muted-foreground/70"
+                  className={cn(
+                    "shrink-0 whitespace-nowrap text-muted-foreground/70",
+                    prototypeRowClass,
+                  )}
                 >
                   {prototypeRole ? (
                     <>
                       <span
                         className={
-                          prototypeFleet?.accent === "project" && !isFirstMateThread(thread)
-                            ? prototypeProjectTextClassName(props.project)
-                            : prototypeFleet?.accent
-                              ? prototypeRoleClassName(thread)
-                              : undefined
+                          prototypeLook
+                            ? prototypeRoleClass
+                            : prototypeFleet?.accent === "project" && !isFirstMateThread(thread)
+                              ? prototypeProjectTextClassName(props.project)
+                              : prototypeFleet?.accent
+                                ? prototypeRoleClassName(thread)
+                                : undefined
                         }
                       >
                         {prototypeRole}
@@ -4962,6 +5006,9 @@ export default function Sidebar() {
                                     depth: prototypeEntry.depth,
                                     note: prototypeEntry.note,
                                     accent: prototypeEntry.accent,
+                                    look: prototypeEntry.look,
+                                    tone: prototypeEntry.tone,
+                                    main: prototypeEntry.main,
                                     fold: prototypeEntry.fold
                                       ? {
                                           expanded: prototypeEntry.fold.expanded,
@@ -5050,7 +5097,7 @@ export default function Sidebar() {
                                 projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
                                 null;
                               // N2c: mock projects get distinct icon colours.
-                              return project && prototypeEntry?.accent === "project"
+                              return project && prototypeEntry?.mockProject
                                 ? prototypeMockProject(project, project.title)
                                 : project;
                             })()}

@@ -15,7 +15,17 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
+import {
+  AnchorIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CompassIcon,
+  CrownIcon,
+  HardHatIcon,
+  ShipWheelIcon,
+  WrenchIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
@@ -26,9 +36,13 @@ import type { FleetBranch } from "../Sidebar.logic";
 export const FLEET_PROTOTYPE_VARIANTS = [
   { key: "N1", name: "Tree under First Mate" },
   { key: "N2", name: "Flat second mates" },
-  { key: "N2b", name: "N2, coloured roles and effort" },
-  { key: "N2c", name: "N2b, roles in project colours" },
   { key: "N3", name: "Flat second mates, folded" },
+  { key: "N2b", name: "N2, coloured roles and effort" },
+  { key: "N2d", name: "semibold roles, project colours, wheel icons" },
+  { key: "N2e", name: "bold titles, palette, wheel icons" },
+  { key: "N2f", name: "whole row, project colours, crown icons" },
+  { key: "N2g", name: "semibold titles, indigo shades, crown icons" },
+  { key: "N2h", name: "bold title and role, palette, crown icons" },
 ] as const;
 export type FleetPrototypeVariant = (typeof FLEET_PROTOTYPE_VARIANTS)[number]["key"];
 
@@ -361,6 +375,112 @@ export function buildPrototypeFleetThreads(
   });
 }
 
+/**
+ * How N2d to N2h dress a fleet row. Every main thread (First Mate and each
+ * second mate) gets its own text colour; a worker takes its second mate's
+ * colour, faded, at regular weight.
+ */
+export interface PrototypeLook {
+  /** Which text carries the colour. */
+  readonly target: "role" | "title" | "row" | "title-role";
+  /** Weight of the coloured text on main threads. Workers stay regular. */
+  readonly mainWeight: "font-semibold" | "font-bold";
+  readonly icons: "wheel" | "crown";
+  /** In place of the project icon, or just after it. */
+  readonly placement: "replace" | "beside";
+}
+
+type Scheme = "project" | "palette" | "accent";
+
+const LOOKS: Partial<Record<FleetPrototypeVariant, PrototypeLook & { readonly scheme: Scheme }>> = {
+  N2d: {
+    target: "role",
+    mainWeight: "font-semibold",
+    icons: "wheel",
+    placement: "beside",
+    scheme: "project",
+  },
+  N2e: {
+    target: "title",
+    mainWeight: "font-bold",
+    icons: "wheel",
+    placement: "replace",
+    scheme: "palette",
+  },
+  N2f: {
+    target: "row",
+    mainWeight: "font-semibold",
+    icons: "crown",
+    placement: "beside",
+    scheme: "project",
+  },
+  N2g: {
+    target: "title",
+    mainWeight: "font-semibold",
+    icons: "crown",
+    placement: "replace",
+    scheme: "accent",
+  },
+  N2h: {
+    target: "title-role",
+    mainWeight: "font-bold",
+    icons: "crown",
+    placement: "replace",
+    scheme: "palette",
+  },
+};
+
+const FIRST_MATE_TONE = "text-pink-600 dark:text-pink-400";
+// One colour per second mate, in repo order. None is a status colour.
+const PALETTE_TONES = [
+  "text-violet-600 dark:text-violet-400",
+  "text-teal-700 dark:text-teal-400",
+  "text-orange-600 dark:text-orange-400",
+  "text-rose-600 dark:text-rose-400",
+];
+// One hue in steps, darkest first.
+const ACCENT_TONES = [
+  "text-indigo-700 dark:text-indigo-300",
+  "text-indigo-600 dark:text-indigo-400",
+  "text-indigo-500 dark:text-indigo-500",
+];
+
+function mateTone(scheme: Scheme, repo: string, index: number): string | undefined {
+  switch (scheme) {
+    case "project": {
+      const icon = MOCK_PROJECT_ICONS[repo];
+      return icon
+        ? (TEXT_SHADE_OVERRIDES[icon.color] ?? projectIconColorClassName(icon.color))
+        : undefined;
+    }
+    case "palette":
+      return PALETTE_TONES[index % PALETTE_TONES.length];
+    case "accent":
+      return ACCENT_TONES[index % ACCENT_TONES.length];
+  }
+}
+
+/** A fleet role's icon from one of the two candidate sets. */
+export function PrototypeRoleIcon(props: {
+  readonly set: PrototypeLook["icons"];
+  readonly role: string | null | undefined;
+  readonly className?: string | undefined;
+}) {
+  const Icon =
+    props.role === "first-mate"
+      ? props.set === "wheel"
+        ? ShipWheelIcon
+        : CrownIcon
+      : props.role === "second-mate"
+        ? props.set === "wheel"
+          ? AnchorIcon
+          : CompassIcon
+        : props.set === "wheel"
+          ? WrenchIcon
+          : HardHatIcon;
+  return <Icon aria-hidden className={props.className} />;
+}
+
 /** One fleet row to draw: the thread, its indent, and its fold arrow if it has children. */
 export interface PrototypeFleetEntry {
   readonly thread: EnvironmentThreadShell;
@@ -372,6 +492,12 @@ export interface PrototypeFleetEntry {
   readonly accent?: "fixed" | "project" | undefined;
   /** N2b: a divider under the pinned First Mate row. */
   readonly dividerAfter?: boolean | undefined;
+  /** N2d to N2h: how the row is dressed, its colour, and whether it is a main thread. */
+  readonly look?: PrototypeLook | undefined;
+  readonly tone?: string | undefined;
+  readonly main?: boolean | undefined;
+  /** Give the row's project a mock monogram icon, so project colours show. */
+  readonly mockProject?: boolean | undefined;
 }
 
 const FIRST_MATE_FOLD = "first-mate";
@@ -394,16 +520,25 @@ export function planPrototypeFleetRows(input: {
 } {
   const { variant, firstMate, branches, isExpanded } = input;
   const tree = variant === "N1";
-  const accent = variant === "N2b" ? "fixed" : variant === "N2c" ? "project" : undefined;
+  const lookSpec = LOOKS[variant];
+  const look: PrototypeLook | undefined = lookSpec;
+  const accent = variant === "N2b" || lookSpec ? "fixed" : undefined;
+  const mockProject = lookSpec?.scheme === "project";
   const mates: PrototypeFleetEntry[] = [];
+  let mateIndex = 0;
   for (const branch of branches) {
     if (branch.secondMate === null) continue;
     const expanded = isExpanded(branch.repo);
     const count = branch.workers.length;
+    const tone = lookSpec ? mateTone(lookSpec.scheme, branch.repo, mateIndex++) : undefined;
     mates.push({
       thread: branch.secondMate,
       depth: tree ? 1 : 0,
       accent,
+      look,
+      tone,
+      main: true,
+      mockProject,
       fold: count > 0 ? { key: branch.repo, expanded } : undefined,
       note:
         variant === "N3" && count > 0
@@ -412,7 +547,15 @@ export function planPrototypeFleetRows(input: {
     });
     if (!expanded) continue;
     for (const worker of branch.workers) {
-      mates.push({ thread: worker, depth: tree ? 2 : 1, accent });
+      mates.push({
+        thread: worker,
+        depth: tree ? 2 : 1,
+        accent,
+        look,
+        tone,
+        main: false,
+        mockProject,
+      });
     }
   }
   const firstMateEntry: PrototypeFleetEntry | null = firstMate
@@ -420,6 +563,10 @@ export function planPrototypeFleetRows(input: {
         thread: firstMate,
         depth: 0,
         accent,
+        look,
+        tone: look ? FIRST_MATE_TONE : undefined,
+        main: true,
+        mockProject,
         dividerAfter: accent !== undefined && input.firstMatePinned,
         fold:
           tree && mates.length > 0
