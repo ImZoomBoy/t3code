@@ -86,10 +86,19 @@ their default order until the server is updated.
 
 ## First Mate threads
 
-On web and desktop, the First Mate thread sits in its own slot at the top of the sidebar,
-outside every project, with a pink ship's wheel. It stays pinned there and never settles
-automatically, even when a pull request linked to it merges. Second mate and worker threads
-sit with their project and carry a **Second mate** or **Worker** label.
+On web and desktop, the sidebar arranges First Mate's fleet as a small tree above your other
+threads. Each fleet row says what it is on its model line, **First Mate**, **Second mate** or
+**Worker**, in its own colour, followed by the model and its reasoning level, with a ship,
+sailboat or pickaxe beside the project icon.
+
+- **First Mate** is pink. Pin it to keep it at the top of the sidebar, above a divider. Unpinned,
+  it lists among your other threads. It never settles automatically, even when a pull request
+  linked to it merges.
+- **Second mates** follow, one per repository, in repository-name order. Each keeps its own colour
+  and its place, whatever it is doing, and never settles away.
+- **Workers** sit indented under the second mate for their repository, in that second mate's
+  colour. Use the arrow beside a second mate to hide or show its workers. A worker you settle or
+  snooze moves to the usual shelf.
 
 When no First Mate thread is live, for example after you archive it, choose **New First Mate**
 at the top of the sidebar to start one. It runs in the folder set in **Settings → General →

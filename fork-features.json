@@ -146,7 +146,7 @@
     },
     {
       "name": "fm-fleet-thread-roles",
-      "description": "Fleet threads carry a role. The First Mate thread gets its own sidebar slot and never auto-settles; second mates and workers are labelled under their project.",
+      "description": "Fleet threads carry a role. The First Mate thread never auto-settles and, pinned, has its own sidebar slot; fm-fleet-sidebar-tree arranges second mates and workers.",
       "keep": "fleetThreads.ts, useStartFirstMateThread.ts and fork migration 8 are ours whole, and the fleetRole and fleetRepo fields, the First Mate sidebar slot, the settlement exception and the single First Mate invariant survive in the files listed; everything else in those files follows upstream.",
       "files": [
         "packages/contracts/src/orchestration.ts",
@@ -158,6 +158,21 @@
         "apps/web/src/hooks/useStartFirstMateThread.ts"
       ],
       "test": "apps/server/src/orchestration/decider.fleetRole.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fm-fleet-sidebar-tree",
+      "description": "The sidebar shows First Mate's fleet as a tree above the other threads. A pinned First Mate sits at the top above a divider; second mates follow in repository-name order and never move or settle away; each worker is indented under the second mate that shares its fleetRepo, and a second mate can fold its workers away. Fleet rows name their role on the model line in their own colour, then the model and reasoning level, with a ship, sailboat or pickaxe beside the project icon. A second mate's colour comes from its repository, so it stays the same across reloads.",
+      "keep": "fleetSidebar.logic.ts, its test and FirstMateIcon.tsx are ours whole. In Sidebar.tsx the fleet tree rows, the FleetRowPlacement prop on SidebarThreadRow, the role line, the fold arrow and the First Mate divider survive; partitionFirstMateThreads and its pinned slot survive in Sidebar.logic.ts and its tests in Sidebar.logic.test.ts; the First Mate threads section of docs/user/thread-sidebar.md is ours. Everything else in those files takes upstream.",
+      "files": [
+        "apps/web/src/components/sidebar/fleetSidebar.logic.ts",
+        "apps/web/src/components/FirstMateIcon.tsx",
+        "apps/web/src/components/Sidebar.tsx",
+        "apps/web/src/components/Sidebar.logic.ts",
+        "apps/web/src/components/Sidebar.logic.test.ts",
+        "docs/user/thread-sidebar.md"
+      ],
+      "test": "apps/web/src/components/sidebar/fleetSidebar.logic.test.ts",
       "patchesUpstream": true
     },
     {
