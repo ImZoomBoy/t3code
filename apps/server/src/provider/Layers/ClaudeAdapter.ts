@@ -18,6 +18,7 @@ import {
   type PermissionMode,
   type PermissionResult,
   type PermissionUpdate,
+  type Query as ClaudeSdkQuery,
   type SDKMessage,
   type SDKRateLimitInfo,
   type SDKResultMessage,
@@ -238,6 +239,7 @@ type ClaudeToolResultStreamKind = Extract<
   "command_output" | "file_change_output"
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
+type ClaudeFlagSettings = Parameters<ClaudeSdkQuery["applyFlagSettings"]>[0];
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -420,9 +422,9 @@ interface ClaudeSessionContext {
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
-  /** Effective effort for the session's turns; subagents without an explicit
-   * effort override inherit this. */
-  currentEffort: string | undefined;
+  /** What the running process holds, so `sendTurn` only sends a change.
+   * Subagents without an explicit effort override inherit its effort. */
+  selectionSettings: ClaudeSelectionSettings;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -463,7 +465,11 @@ interface ClaudeSessionContext {
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
-  readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
+  readonly setMaxThinkingTokens: (
+    maxThinkingTokens: number | null,
+    thinkingDisplay?: "summarized" | "omitted" | null,
+  ) => Promise<void>;
+  readonly applyFlagSettings: (settings: ClaudeFlagSettings) => Promise<void>;
   readonly close: () => void;
 }
 
@@ -535,6 +541,55 @@ function getEffectiveClaudeAgentEffort(
 ): ClaudeSdkEffort | null {
   const normalized = normalizeClaudeCatalogEffort(catalog, effort, model);
   return normalized ? (normalized as ClaudeSdkEffort) : null;
+}
+
+/**
+ * The session settings a model selection drives, apart from the model id.
+ * A session starts with them, and `sendTurn` applies a changed set to the
+ * running process, so an option change never needs a new session.
+ */
+interface ClaudeSelectionSettings {
+  readonly effort: ClaudeSdkEffort | null;
+  readonly ultracode: boolean;
+  readonly fastMode: boolean;
+  readonly thinking: boolean | undefined;
+  readonly showThinkingSummaries: boolean;
+}
+
+/** A flag setting that is on, or cleared from the flag layer when off. */
+const flagOrCleared = (on: boolean) => (on ? true : null);
+
+function resolveClaudeSelectionSettings(
+  catalog: ClaudeModelCatalog,
+  modelSelection: ModelSelection | undefined,
+  thinkingDisplayArg: string | null | undefined,
+): ClaudeSelectionSettings {
+  const descriptors = getProviderOptionDescriptors({
+    caps: getClaudeCatalogModelCapabilities(catalog, modelSelection?.model),
+  });
+  const supportsBooleanOption = (id: string) =>
+    descriptors.some((descriptor) => descriptor.type === "boolean" && descriptor.id === id);
+  const effort =
+    resolveClaudeCatalogEffort(
+      catalog,
+      modelSelection?.model,
+      getModelSelectionStringOptionValue(modelSelection, "effort"),
+    ) ?? null;
+  const thinking = supportsBooleanOption("thinking")
+    ? getModelSelectionBooleanOptionValue(modelSelection, "thinking")
+    : undefined;
+  return {
+    effort: getEffectiveClaudeAgentEffort(catalog, effort, modelSelection?.model),
+    ultracode: isClaudeCatalogUltracodeEffort(effort),
+    fastMode:
+      supportsBooleanOption("fastMode") &&
+      getModelSelectionBooleanOptionValue(modelSelection, "fastMode") === true,
+    thinking,
+    showThinkingSummaries: shouldRequestClaudeThinkingSummaries({
+      thinking,
+      thinkingDisplay: thinkingDisplayArg,
+    }),
+  };
 }
 
 function isClaudeInterruptedMessage(message: string): boolean {
@@ -2088,6 +2143,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     claudeSettings.binaryPath,
     claudeEnvironment,
   );
+  // The user's own --thinking-display launch arg, which the model selection's
+  // thinking settings defer to.
+  const launchThinkingDisplay = parseCliArgs(claudeSettings.launchArgs).flags["thinking-display"];
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -3748,7 +3806,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           trimmedString(rawLaunchEffort) ??
           (typeof rawLaunchEffort === "number" && Number.isFinite(rawLaunchEffort)
             ? String(rawLaunchEffort)
-            : context.currentEffort);
+            : (context.selectionSettings.effort ?? undefined));
         // Remember the agent identity so every later task.* payload for this
         // taskId is self-describing (identity must survive activity retention).
         context.taskAgents.set(message.task_id, {
@@ -4848,38 +4906,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             model: resolveClaudeModelSlug(modelCatalog, selectedModel.model),
           }
         : undefined;
-      const caps = getClaudeCatalogModelCapabilities(modelCatalog, modelSelection?.model);
-      const descriptors = getProviderOptionDescriptors({ caps });
       const apiModelId = modelSelection
         ? resolveClaudeCatalogApiModelId(modelCatalog, modelSelection)
         : undefined;
       const initialContextWindow = selectedClaudeContextWindow(modelCatalog, modelSelection);
-      const rawEffort = getModelSelectionStringOptionValue(modelSelection, "effort");
-      const effort =
-        resolveClaudeCatalogEffort(modelCatalog, modelSelection?.model, rawEffort) ?? null;
-      const fastModeSupported = descriptors.some(
-        (descriptor) => descriptor.type === "boolean" && descriptor.id === "fastMode",
-      );
-      const thinkingSupported = descriptors.some(
-        (descriptor) => descriptor.type === "boolean" && descriptor.id === "thinking",
-      );
-      const fastMode =
-        getModelSelectionBooleanOptionValue(modelSelection, "fastMode") === true &&
-        fastModeSupported;
-      const thinking = thinkingSupported
-        ? getModelSelectionBooleanOptionValue(modelSelection, "thinking")
-        : undefined;
-      const thinkingDisplayArg = extraArgs["thinking-display"];
-      const requestThinkingSummaries = shouldRequestClaudeThinkingSummaries({
-        thinking,
-        thinkingDisplay: typeof thinkingDisplayArg === "string" ? thinkingDisplayArg : undefined,
-      });
-      const ultracode = isClaudeCatalogUltracodeEffort(effort);
-      const effectiveEffort = getEffectiveClaudeAgentEffort(
+      const selectionSettings = resolveClaudeSelectionSettings(
         modelCatalog,
-        effort,
-        modelSelection?.model,
+        modelSelection,
+        launchThinkingDisplay,
       );
+      const { effort, ultracode, fastMode, thinking, showThinkingSummaries } = selectionSettings;
       const runtimeModeToPermission: Record<string, PermissionMode> = {
         "auto-accept-edits": "acceptEdits",
         auto: "auto",
@@ -4895,14 +4931,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : runtimeModeToPermission[input.runtimeMode]);
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
-        ...(requestThinkingSummaries ? { showThinkingSummaries: true } : {}),
+        ...(showThinkingSummaries ? { showThinkingSummaries: true } : {}),
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
         ...(claudeSettings.autoCompactWindow
           ? { autoCompactWindow: Number(claudeSettings.autoCompactWindow) }
           : {}),
       };
-      if (requestThinkingSummaries && extraArgs["thinking-display"] === undefined) {
+      if (showThinkingSummaries && extraArgs["thinking-display"] === undefined) {
         extraArgs["thinking-display"] = "summarized";
       }
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
@@ -4927,9 +4963,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
-        ...(effectiveEffort
+        ...(effort
           ? {
-              effort: effectiveEffort as unknown as NonNullable<ClaudeQueryOptions["effort"]>,
+              effort: effort as unknown as NonNullable<ClaudeQueryOptions["effort"]>,
             }
           : {}),
         ...(extraArgs["thinking-display"] === "summarized"
@@ -4986,7 +5022,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.resume.turn_count": resumeState?.turnCount ?? -1,
         "claude.query.cwd": input.cwd ?? "",
         "claude.query.model": apiModelId ?? "",
-        "claude.query.effort": effectiveEffort ?? "",
+        "claude.query.effort": effort ?? "",
         "claude.query.permission_mode": permissionMode ?? "",
         "claude.query.allow_dangerously_skip_permissions": permissionMode === "bypassPermissions",
         "claude.query.resume": existingResumeSessionId ?? "",
@@ -5048,7 +5084,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         startedAt,
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
-        currentEffort: effectiveEffort ?? undefined,
+        selectionSettings,
         resumeSessionId: sessionId,
         pendingApprovals,
         pendingUserInputs,
@@ -5093,7 +5129,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           config: {
             ...(apiModelId ? { model: apiModelId } : {}),
             ...(input.cwd ? { cwd: input.cwd } : {}),
-            ...(effectiveEffort ? { effort: effectiveEffort } : {}),
+            ...(effort ? { effort } : {}),
             ...(permissionMode ? { permissionMode } : {}),
             ...(fastMode ? { fastMode: true } : {}),
           },
@@ -5145,6 +5181,53 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  /**
+   * Moves the running process to a new set of selection settings. The reactor
+   * keeps a session with live background work instead of restarting it, and
+   * this is how that session picks up an option change.
+   */
+  const applySelectionSettings = Effect.fn("applySelectionSettings")(function* (
+    context: ClaudeSessionContext,
+    next: ClaudeSelectionSettings,
+  ) {
+    const previous = context.selectionSettings;
+    const threadId = context.session.threadId;
+    // `null` clears a key from the flag layer: effort goes back to the
+    // model's default, and ultracode turns off with the effort kept.
+    const flagSettings: ClaudeFlagSettings = {
+      ...(next.effort !== previous.effort ? { effortLevel: next.effort } : {}),
+      ...(next.ultracode !== previous.ultracode
+        ? { ultracode: flagOrCleared(next.ultracode) }
+        : {}),
+      ...(next.fastMode !== previous.fastMode ? { fastMode: flagOrCleared(next.fastMode) } : {}),
+      ...(next.thinking !== previous.thinking
+        ? { alwaysThinkingEnabled: next.thinking ?? null }
+        : {}),
+      ...(next.showThinkingSummaries !== previous.showThinkingSummaries
+        ? { showThinkingSummaries: flagOrCleared(next.showThinkingSummaries) }
+        : {}),
+    };
+    if (Object.keys(flagSettings).length > 0) {
+      yield* Effect.tryPromise({
+        try: () => context.query.applyFlagSettings(flagSettings),
+        catch: (cause) => toRequestError(threadId, "turn/applyFlagSettings", cause),
+      });
+    }
+    // Thinking also goes through the SDK's live thinking control. 0 turns it
+    // off, and null clears that override.
+    if (next.thinking !== previous.thinking) {
+      yield* Effect.tryPromise({
+        try: () =>
+          context.query.setMaxThinkingTokens(
+            next.thinking === false ? 0 : null,
+            next.showThinkingSummaries ? "summarized" : undefined,
+          ),
+        catch: (cause) => toRequestError(threadId, "turn/setMaxThinkingTokens", cause),
+      });
+    }
+    context.selectionSettings = next;
+  });
+
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);
     const modelCatalog = yield* modelCatalogEffect;
@@ -5183,14 +5266,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...context.session,
         model: modelSelection.model,
       };
-      const turnEffort = resolveClaudeCatalogEffort(
-        modelCatalog,
-        modelSelection.model,
-        getModelSelectionStringOptionValue(modelSelection, "effort"),
+    }
+    if (modelSelection) {
+      yield* applySelectionSettings(
+        context,
+        resolveClaudeSelectionSettings(modelCatalog, modelSelection, launchThinkingDisplay),
       );
-      context.currentEffort =
-        getEffectiveClaudeAgentEffort(modelCatalog, turnEffort ?? null, modelSelection.model) ??
-        undefined;
     }
 
     // Apply interaction mode by switching the SDK's permission mode.
