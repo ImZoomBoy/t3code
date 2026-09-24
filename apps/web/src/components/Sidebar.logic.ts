@@ -922,6 +922,75 @@ export function partitionFirstMateThreads<
   return { slot, rest };
 }
 
+/** One second mate and the workers it launched, keyed by their shared `fleetRepo`. */
+export interface FleetBranch<T> {
+  readonly repo: string;
+  /** Null when workers run in a repository that has no live second mate. */
+  readonly secondMate: T | null;
+  readonly workers: readonly T[];
+}
+
+/**
+ * Arrange the fleet's second mates and workers as a tree. A worker's
+ * `fleetRepo` is the repository key its second mate carries, so the two
+ * share it and nothing else links them. Branches sort by repository name and
+ * workers by launch order, never by activity, so no row moves when a thread
+ * gets busy. `parked` workers (settled or snoozed) leave the tree for the
+ * ordinary shelves; second mates never do. Archived fleet threads and every
+ * other thread go to `rest`.
+ */
+export function buildFleetTree<
+  T extends FleetThreadFields & {
+    readonly archivedAt: string | null;
+    readonly createdAt: string;
+    readonly id: string;
+  },
+>(
+  threads: readonly T[],
+  parked: (thread: T) => boolean = () => false,
+): { readonly branches: FleetBranch<T>[]; readonly rest: T[] } {
+  const byRepo = new Map<string, { secondMate: T | null; workers: T[] }>();
+  const rest: T[] = [];
+  for (const thread of threads) {
+    const isFleetChild = thread.fleetRole === "second-mate" || thread.fleetRole === "worker";
+    if (
+      !isFleetChild ||
+      thread.archivedAt !== null ||
+      (thread.fleetRole === "worker" && parked(thread))
+    ) {
+      rest.push(thread);
+      continue;
+    }
+    const repo = thread.fleetRepo ?? "";
+    const branch = byRepo.get(repo) ?? { secondMate: null, workers: [] };
+    byRepo.set(repo, branch);
+    if (thread.fleetRole === "worker") {
+      branch.workers.push(thread);
+    } else if (branch.secondMate === null || thread.createdAt > branch.secondMate.createdAt) {
+      // One second mate per repository; a stray older one reads as a thread.
+      if (branch.secondMate !== null) rest.push(branch.secondMate);
+      branch.secondMate = thread;
+    } else {
+      rest.push(thread);
+    }
+  }
+  const byLaunch = (left: T, right: T) =>
+    left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+  const branches = [...byRepo.entries()]
+    .map(([repo, branch]) => ({
+      repo,
+      secondMate: branch.secondMate,
+      workers: branch.workers.toSorted(byLaunch),
+    }))
+    .toSorted(
+      (left, right) =>
+        // A repository with no second mate sorts after every crewed one.
+        Number(left.secondMate === null) - Number(right.secondMate === null) ||
+        left.repo.localeCompare(right.repo),
+    );
+  return { branches, rest };
+}
+
 /**
  * Search the already-ordered sidebar thread collection by title or linked PR,
  * plus any thread whose messages the server matched (`contentMatchKeys`, keyed
