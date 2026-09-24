@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type OrchestrationCommand,
   type ProviderSendTurnInput,
   ThreadId,
   TurnId,
@@ -484,4 +485,141 @@ it.effect.each(["opt-in desktop restart", "marked remote update"] as const)(
         ),
       ),
     ),
+);
+
+it.effect("settles deferred turn starts through startup after a restart", () =>
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const createdAt = DateTime.formatIso(yield* DateTime.now);
+    const orphanedThreadId = ThreadId.make("thread-deferred-orphaned-turn");
+    const lostStartThreadId = ThreadId.make("thread-deferred-lost-start");
+    const turnStart = (
+      threadId: ThreadId,
+      id: string,
+      whenBusy?: "queue",
+    ): OrchestrationCommand => ({
+      type: "thread.turn.start",
+      commandId: CommandId.make(id),
+      threadId,
+      message: {
+        messageId: MessageId.make(`message-${id}`),
+        role: "user",
+        text: `message from ${id}`,
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "full-access",
+      ...(whenBusy !== undefined ? { whenBusy } : {}),
+      createdAt,
+    });
+
+    yield* Effect.gen(function* () {
+      const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("command-create-project"),
+        projectId,
+        title: "Deferred turn starts",
+        workspaceRoot: "/tmp/startup-deferred-project",
+        defaultModelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+        createdAt,
+      });
+      for (const threadId of [orphanedThreadId, lostStartThreadId]) {
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`command-create-${threadId}`),
+          threadId,
+          projectId,
+          title: "Deferred turn starts",
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        });
+      }
+      // A turn was running when the process died, and a wake waits behind it.
+      yield* engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("command-orphaned-running"),
+        threadId: orphanedThreadId,
+        session: {
+          threadId: orphanedThreadId,
+          status: "running",
+          providerName: "codex",
+          providerInstanceId,
+          runtimeMode: "full-access",
+          activeTurnId: TurnId.make("turn-orphaned"),
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+      yield* engine.dispatch(turnStart(orphanedThreadId, "wake-orphaned", "queue"));
+      // A turn start was asked for but never reached a provider, and a wake
+      // waits behind it. The session stays idle.
+      yield* engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("command-lost-start-ready"),
+        threadId: lostStartThreadId,
+        session: {
+          threadId: lostStartThreadId,
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId,
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+      yield* engine.dispatch(turnStart(lostStartThreadId, "person-lost"));
+      yield* engine.dispatch(turnStart(lostStartThreadId, "wake-lost-start", "queue"));
+    }).pipe(Effect.provide(makePersistedRuntimeLayer(config.dbPath)));
+
+    const startupLayer = ServerRuntimeStartup.layer.pipe(
+      Layer.provideMerge(makePersistedRuntimeLayer(config.dbPath)),
+      Layer.provideMerge(startupDependencies),
+    );
+    const eventTypes = yield* Effect.gen(function* () {
+      const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+      const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+      yield* startup.markHttpListening;
+      yield* startup.awaitCommandReady;
+      const events = Array.from(yield* Stream.runCollect(engine.readEvents(0)));
+      const typesFor = (commandId: string) =>
+        events.filter((event) => event.commandId === commandId).map((event) => event.type);
+      const dropped = events.find(
+        (event) =>
+          event.type === "thread.deferred-turn-start-dropped" &&
+          event.commandId === "wake-orphaned",
+      );
+      return {
+        orphaned: typesFor("wake-orphaned"),
+        orphanedReason:
+          dropped?.type === "thread.deferred-turn-start-dropped" ? dropped.payload.reason : null,
+        lostStart: typesFor("wake-lost-start"),
+      };
+    }).pipe(Effect.provide(startupLayer));
+
+    assert.deepStrictEqual(eventTypes, {
+      // The restart ended the running turn with an error, so its wake is dropped.
+      orphaned: ["thread.turn-start-deferred", "thread.deferred-turn-start-dropped"],
+      orphanedReason: "session-error",
+      // Nothing will free the other thread on its own, so startup starts its wake.
+      lostStart: [
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ],
+    });
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-startup-deferred-turn-starts-" }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
 );

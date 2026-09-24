@@ -162,14 +162,18 @@
     },
     {
       "name": "fm-turn-start-when-busy",
-      "description": "A turn start can ask to wait for an idle thread with whenBusy: \"queue\", so a supervisor's wake never steers into a turn the person just started. The decider holds it while the thread is busy and starts it in the same command that takes the thread idle. It is persisted, so it survives a restart and runs once.",
-      "keep": "ProjectionThreadDeferredTurnStarts.ts and fork migration 9 are ours whole; the whenBusy option, the thread.turn-start-deferred event and the deferredTurnStarts field survive in orchestration.ts, the defer and start rules survive in decider.ts and projector.ts, and the deferred-turn-start table writes and reads survive in ProjectionPipeline.ts and ProjectionSnapshotQuery.ts; everything else in those files takes upstream.",
+      "description": "A turn start can ask to wait for an idle thread with whenBusy: \"queue\", so a supervisor's wake never steers into a turn the person just started. The decider holds it while the thread is busy, starts it in the command that frees the thread after a normal turn end, and drops it with a recorded reason on Stop, a stopped, interrupted or failed session, a failed turn start, archive or delete. It is persisted, so it survives a restart and runs once. The server advertises turnStartWhenBusy in its environment capabilities.",
+      "keep": "deferredTurnStarts.ts, ProjectionThreadDeferredTurnStarts.ts, fork migration 9 and turnStartWhenBusy.integration.test.ts are ours whole. The whenBusy option, the thread.turn-start-deferred and thread.deferred-turn-start-dropped events, the thread.deferred-turn-start.release command and the deferredTurnStarts and pendingTurnStart fields survive in orchestration.ts; the turnStartWhenBusy capability survives in environment.ts and ServerEnvironment.ts; the whenBusy queue branch, the release command case and the decideOrchestrationCommand wrapper that calls followDeferredTurnStarts survive in decider.ts; the projectEvent wrapper that calls projectDeferredTurnStarts survives in projector.ts; the deferred-turn-start table writes and reads survive in ProjectionPipeline.ts and ProjectionSnapshotQuery.ts; the startup release loop survives in serverRuntimeStartup.ts; and holdCompletion, getSteers, getTurnInputs and awaitSends survive in TestProviderAdapter.integration.ts. Everything else in those files takes upstream.",
       "files": [
         "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/environment.ts",
+        "apps/server/src/environment/ServerEnvironment.ts",
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
         "apps/server/src/orchestration/decider.ts",
         "apps/server/src/orchestration/projector.ts",
         "apps/server/src/orchestration/Layers/ProjectionPipeline.ts",
         "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts",
+        "apps/server/src/serverRuntimeStartup.ts",
         "apps/server/src/persistence/ProjectionThreadDeferredTurnStarts.ts",
         "apps/server/src/persistence/ForkMigrations/009_ProjectionThreadDeferredTurnStarts.ts",
         "apps/server/integration/TestProviderAdapter.integration.ts"

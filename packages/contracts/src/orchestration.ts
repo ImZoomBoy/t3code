@@ -818,6 +818,9 @@ export const OrchestrationDeferredTurnStart = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Kept so the turn is checked against the thread's read-only rule the same
+  // way when it starts. See `ThreadTurnStartCommand.issuer`.
+  issuer: Schema.optional(Schema.Literal("fleet")),
   deferredAt: IsoDateTime,
 });
 export type OrchestrationDeferredTurnStart = typeof OrchestrationDeferredTurnStart.Type;
@@ -902,6 +905,12 @@ export const OrchestrationThread = Schema.Struct({
   // server's command model carries it: client snapshots leave it out, so a
   // deferred turn start is not shown until it starts. Absent means none.
   deferredTurnStarts: Schema.optional(Schema.Array(OrchestrationDeferredTurnStart)),
+  // The turn start the server has asked a provider for and that no turn has
+  // taken up yet. Command model only, and not kept across a restart: a turn
+  // start the provider reactor had not handled is lost with the process.
+  pendingTurnStart: Schema.optional(
+    Schema.NullOr(Schema.Struct({ messageId: MessageId, requestedAt: IsoDateTime })),
+  ),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -1803,8 +1812,19 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
   stack: Schema.NullOr(ThreadPullRequestStack),
 });
 
+// Starts the oldest deferred turn start if the thread is free. The provider
+// reactor sends it at startup, for a thread whose turn start was lost with the
+// previous process and so will never free the thread on its own.
+const ThreadDeferredTurnStartReleaseCommand = Schema.Struct({
+  type: Schema.Literal("thread.deferred-turn-start.release"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ProjectRepositoryIdentityRecordCommand,
+  ThreadDeferredTurnStartReleaseCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
@@ -1858,6 +1878,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-start-deferred",
+  "thread.deferred-turn-start-dropped",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
@@ -2099,6 +2120,34 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Why a deferred turn start was dropped instead of started. */
+export const DeferredTurnStartDropReason = Schema.Literals([
+  // Someone pressed Stop on the running turn.
+  "turn-interrupt-requested",
+  // Someone stopped the provider session.
+  "session-stop-requested",
+  // The turn ended without completing: the session stopped, was
+  // interrupted, or failed.
+  "session-stopped",
+  "session-interrupted",
+  "session-error",
+  // The turn start the thread was waiting on failed before a turn began.
+  "turn-start-failed",
+  // The deferred turn start itself could not start, for example because the
+  // proposed plan it references is gone.
+  "turn-start-refused",
+  "thread-archived",
+  "thread-deleted",
+]);
+export type DeferredTurnStartDropReason = typeof DeferredTurnStartDropReason.Type;
+
+export const ThreadDeferredTurnStartDroppedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  reason: DeferredTurnStartDropReason,
+  droppedAt: IsoDateTime,
+});
+
 export const ThreadTurnStartDeferredPayload = Schema.Struct({
   threadId: ThreadId,
   ...OrchestrationDeferredTurnStart.fields,
@@ -2329,6 +2378,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-deferred"),
     payload: ThreadTurnStartDeferredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.deferred-turn-start-dropped"),
+    payload: ThreadDeferredTurnStartDroppedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

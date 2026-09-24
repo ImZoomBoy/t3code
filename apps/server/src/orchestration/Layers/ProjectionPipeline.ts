@@ -1007,6 +1007,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.turn-start-requested":
+        case "thread.deferred-turn-start-dropped":
           yield* projectionThreadDeferredTurnStartRepository.delete({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
