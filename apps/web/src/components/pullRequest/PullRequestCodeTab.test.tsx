@@ -17,8 +17,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
  * every environment query, a read depends on the connection, so a reconnect re-runs each mounted
  * read and leaves an unmounted one holding what it last answered.
  */
-const { server, connection, diffRead, sentinels, viewer, Wrapper } = vi.hoisted(() => {
-  const server = { pages: new Map<string | null, string>(), reads: [] as Array<string | null> };
+const { server, connection, diffRead, sentinels, viewer, PassThrough } = vi.hoisted(() => {
+  const server = {
+    pages: new Map<string | null, ServerPage>(),
+    reads: [] as Array<string | null>,
+  };
   const sentinels: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
   return {
     server,
@@ -26,7 +29,7 @@ const { server, connection, diffRead, sentinels, viewer, Wrapper } = vi.hoisted(
     viewer: { items: [] as ReadonlyArray<unknown> },
     connection: { atom: null as unknown },
     diffRead: { family: null as unknown },
-    Wrapper: ({ children }: { children?: ReactNode }) => children,
+    PassThrough: ({ children }: { children?: ReactNode }) => children,
   };
 });
 
@@ -68,17 +71,17 @@ vi.mock("../diffs/StyledDiffCodeView", () => ({
 }));
 vi.mock("../diffs/useCodeViewFileReveal", () => ({ useCodeViewFileReveal: () => vi.fn() }));
 vi.mock("../ui/tooltip", () => ({
-  Tooltip: Wrapper,
-  TooltipTrigger: Wrapper,
+  Tooltip: PassThrough,
+  TooltipTrigger: PassThrough,
   TooltipPopup: () => null,
 }));
 vi.mock("../ui/menu", () => ({
-  DropdownMenu: Wrapper,
-  DropdownMenuContent: Wrapper,
-  DropdownMenuItem: Wrapper,
-  DropdownMenuRadioGroup: Wrapper,
-  DropdownMenuRadioItem: Wrapper,
-  DropdownMenuTrigger: Wrapper,
+  DropdownMenu: PassThrough,
+  DropdownMenuContent: PassThrough,
+  DropdownMenuItem: PassThrough,
+  DropdownMenuRadioGroup: PassThrough,
+  DropdownMenuRadioItem: PassThrough,
+  DropdownMenuTrigger: PassThrough,
 }));
 vi.mock("../ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 
@@ -109,10 +112,14 @@ const detail = {
   viewerPermissions: { comment: false },
 } as unknown as PullRequestDetailView;
 
-/** Three pages of one file each, the way a host pages a diff: by position. */
-const NEXT: Record<string, string | null> = { first: "2", "2": "3", "3": null };
+/** One file per page. A page's cursor is the name of its file, the first page's is null. */
+interface ServerPage {
+  readonly line: string;
+  readonly nextCursor: string | null;
+}
 
-function patch(path: string, line: string): string {
+function patch(line: string): string {
+  const path = `${line.split(" ")[0]}.ts`;
   return [
     `diff --git a/${path} b/${path}`,
     `--- a/${path}`,
@@ -124,12 +131,9 @@ function patch(path: string, line: string): string {
   ].join("\n");
 }
 
-function page(cursor: string | null): PullRequestDiffResult {
-  return {
-    patch: server.pages.get(cursor) ?? "",
-    truncated: false,
-    nextCursor: NEXT[cursor ?? "first"] ?? null,
-  };
+function answer(cursor: string | null): PullRequestDiffResult {
+  const page = server.pages.get(cursor);
+  return { patch: patch(page?.line ?? ""), truncated: false, nextCursor: page?.nextCursor ?? null };
 }
 
 let renderer: ReactTestRenderer | null = null;
@@ -148,24 +152,24 @@ beforeEach(() => {
     },
   );
   server.pages = new Map([
-    [null, patch("a.ts", "a version 1")],
-    ["2", patch("b.ts", "b version 1")],
-    ["3", patch("c.ts", "c version 1")],
+    [null, { line: "a version 1", nextCursor: "b" }],
+    ["b", { line: "b version 1", nextCursor: "c" }],
+    ["c", { line: "c version 1", nextCursor: null }],
   ]);
   server.reads = [];
   registry = AtomRegistry.make();
   sentinels.length = 0;
   viewer.items = [];
-  const phase = Atom.make<Phase>("connected").pipe(Atom.keepAlive);
-  connection.atom = phase;
+  const connectionPhase = Atom.make<Phase>("connected").pipe(Atom.keepAlive);
+  connection.atom = connectionPhase;
   diffRead.family = Atom.family((key: string) =>
     Atom.make((get): AsyncResult.AsyncResult<PullRequestDiffResult> => {
-      if (get(phase) !== "connected") {
+      if (get(connectionPhase) !== "connected") {
         return AsyncResult.waitingFrom(get.self<AsyncResult.AsyncResult<PullRequestDiffResult>>());
       }
       const cursor = (JSON.parse(key) as { input: { cursor?: string } }).input.cursor ?? null;
       server.reads.push(cursor);
-      return AsyncResult.success(page(cursor));
+      return AsyncResult.success(answer(cursor));
     }).pipe(Atom.keepAlive),
   );
 });
@@ -180,12 +184,10 @@ async function setPhase(next: Phase) {
   await act(async () => registry.set(connection.atom as Atom.Writable<Phase>, next));
 }
 
-/** The files on screen, as the text of their changed lines. */
+/** The files on screen, in order, as the text of their changed lines. */
 function shownLines(): ReadonlyArray<string> {
   const text = JSON.stringify(viewer.items);
-  return ["a", "b", "c"].flatMap((file) =>
-    [1, 2].map((version) => `${file} version ${version}`).filter((line) => text.includes(line)),
-  );
+  return [...new Set(Array.from(text.matchAll(/[a-z]+ version \d/g), (match) => match[0]))];
 }
 
 async function scrollToEnd() {
@@ -194,18 +196,31 @@ async function scrollToEnd() {
 
 it.each([
   {
-    changed: "the first page",
-    cursor: null,
-    line: "a version 2",
-    afterReconnect: ["a version 2"],
-    scrollsToEnd: 2,
+    changed: "the first page, its next page unmoved",
+    edits: [[null, { line: "a version 2", nextCursor: "b" }]] as const,
+    afterReconnect: ["a version 2", "b version 1", "c version 1"],
+    scrollsToEnd: 0,
+    atEnd: ["a version 2", "b version 1", "c version 1"],
   },
   {
-    changed: "a later page",
-    cursor: "2",
-    line: "b version 2",
-    afterReconnect: ["a version 1", "b version 2"],
-    scrollsToEnd: 1,
+    changed: "a later page, its next page unmoved",
+    edits: [["b", { line: "b version 2", nextCursor: "c" }]] as const,
+    afterReconnect: ["a version 1", "b version 2", "c version 1"],
+    scrollsToEnd: 0,
+    atEnd: ["a version 1", "b version 2", "c version 1"],
+  },
+  {
+    // A file added between the first and second pages moves where the second page starts.
+    changed: "the first page, its next page moved",
+    edits: [
+      [null, { line: "a version 2", nextCursor: "ab" }],
+      ["ab", { line: "ab version 1", nextCursor: "b" }],
+    ] as const,
+    // The pages after it were positions in the old diff, so they go, and come back as the reader
+    // reaches the end again.
+    afterReconnect: ["a version 2"],
+    scrollsToEnd: 3,
+    atEnd: ["a version 2", "ab version 1", "b version 1", "c version 1"],
   },
 ])("a reconnect shows $changed as it is now", async (change) => {
   await act(async () => {
@@ -228,23 +243,16 @@ it.each([
   await scrollToEnd();
   expect(shownLines()).toEqual(["a version 1", "b version 1", "c version 1"]);
   // Opening and paging read each page once.
-  expect(server.reads).toEqual([null, "2", "3"]);
+  expect(server.reads).toEqual([null, "b", "c"]);
 
   await setPhase("offline");
-  // A turn changes one page's file while the client is away.
-  const file = change.line.slice(0, 1);
-  server.pages.set(change.cursor, patch(`${file}.ts`, change.line));
+  // A turn changes the diff while the client is away.
+  for (const [cursor, page] of change.edits) server.pages.set(cursor, page);
   await setPhase("connected");
 
   // The reconnect re-reads each loaded page once.
-  expect(server.reads.slice(3).toSorted()).toEqual([null, "2", "3"].toSorted());
-  // The changed page is shown as it is now. The pages after it were positions in the old diff,
-  // so they go, and come back as the reader reaches the end again.
+  expect(server.reads.slice(3).toSorted()).toEqual([null, "b", "c"].toSorted());
   expect(shownLines()).toEqual(change.afterReconnect);
   for (let scroll = 0; scroll < change.scrollsToEnd; scroll++) await scrollToEnd();
-  expect(shownLines()).toEqual(
-    ["a version 1", "b version 1", "c version 1"].map((line) =>
-      line.startsWith(file) ? change.line : line,
-    ),
-  );
+  expect(shownLines()).toEqual(change.atEnd);
 });

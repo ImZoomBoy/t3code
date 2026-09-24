@@ -166,22 +166,27 @@ function isSameDiffSlice(existing: DiffSlice, next: DiffSlice): boolean {
  * dropped, and its answer arrived late.
  */
 function receiveDiffSlice(previous: SliceState, scopeKey: string, next: DiffSlice): SliceState {
-  const current = previous.key === scopeKey;
-  const slices = current ? previous.slices : NO_SLICES;
+  const isCurrentScope = previous.key === scopeKey;
+  const slices = isCurrentScope ? previous.slices : NO_SLICES;
   const index = slices.findIndex((slice) => slice.cursor === next.cursor);
   if (index === -1) {
-    const askedFor = current ? previous.cursor : null;
+    const askedFor = isCurrentScope ? previous.cursor : null;
     return askedFor === next.cursor
       ? { key: scopeKey, cursor: next.cursor, slices: [...slices, next] }
       : previous;
   }
   const existing = slices[index];
-  if (existing !== undefined && isSameDiffSlice(existing, next)) {
+  if (existing === undefined || isSameDiffSlice(existing, next)) {
     return previous;
   }
-  // A slice that came back different means the diff moved under the review. The slices after it
-  // go with the replacement: their cursors were positions in the old diff. Reading on resumes
-  // from the replacement.
+  // A slice that came back different means the diff moved under the review. While it still ends
+  // where it did, the slices after it start where they did too, and are kept: every loaded slice
+  // is re-read together, so each brings its own answer.
+  if (existing.nextCursor === next.nextCursor) {
+    return { ...previous, slices: slices.map((slice, at) => (at === index ? next : slice)) };
+  }
+  // Otherwise the slices after it go with the replacement: their cursors were positions in the
+  // old diff. Reading on resumes from the replacement.
   return { key: scopeKey, cursor: next.cursor, slices: [...slices.slice(0, index), next] };
 }
 
@@ -376,18 +381,16 @@ function PullRequestCodeTab({
   const diffQuery = useEnvironmentQuery(diffSliceAtom(cursor));
   // Each answer is kept as its own slice. Concatenating the patches and re-parsing the growing
   // text would cost more with every slice, which is the wall the slicing exists to remove.
-  useEffect(() => {
-    const data = diffQuery.data;
-    if (data === null) return;
-    setSliceState((previous) => receiveDiffSlice(previous, scopeKey, toDiffSlice(cursor, data)));
-  }, [cursor, diffQuery.data, scopeKey]);
-  const receiveLoadedSlice = useCallback(
+  const receiveSlice = useCallback(
     (sliceCursor: string | null, data: PullRequestDiffResult) =>
       setSliceState((previous) =>
         receiveDiffSlice(previous, scopeKey, toDiffSlice(sliceCursor, data)),
       ),
     [scopeKey],
   );
+  useEffect(() => {
+    if (diffQuery.data !== null) receiveSlice(cursor, diffQuery.data);
+  }, [cursor, diffQuery.data, receiveSlice]);
   // The refresh button rereads from the first page rather than the page the reader is on:
   // pages are positions in one snapshot of the diff, and a fresh snapshot starts over.
   const refreshFirstDiffPage = useAtomRefresh(diffSliceAtom(null));
@@ -1463,7 +1466,7 @@ function PullRequestCodeTab({
           key={slice.cursor ?? ""}
           atom={diffSliceAtom(slice.cursor)}
           cursor={slice.cursor}
-          onAnswer={receiveLoadedSlice}
+          onAnswer={receiveSlice}
         />
       ))}
       {toolbar}
