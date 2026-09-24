@@ -159,6 +159,17 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { FirstMateIcon, FleetRoleIcon } from "./FirstMateIcon";
+import {
+  buildPrototypeFleetThreads,
+  type FleetPrototypeState,
+  type FleetRowLayout,
+  isPrototypeThread,
+  prototypeFirstMateControlLabel,
+  renderFleetPrototype,
+  setPrototypeFirstMateRunning,
+  usePrototypeFirstMateRunning,
+  useFleetPrototypeVariant,
+} from "./sidebar/FleetSidebarPrototype";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
@@ -178,7 +189,6 @@ import {
   reduceSidebarProjectScopeMenuState,
   partitionFirstMateThreads,
   buildFleetTree,
-  type FleetBranch,
   resolveAdjacentThreadId,
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
@@ -987,6 +997,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Role words lead the row: "Second mate - t3code" or "Worker" is the main
   // line and the task sits under it. "compact" drops the card's third line.
   fleetWords?: "full" | "compact" | undefined;
+  // PROTOTYPE stubs: a local pin toggle and a lane expand and collapse.
+  prototypePinToggle?: (() => void) | undefined;
+  prototypeLane?: { readonly expanded: boolean; readonly onToggle: () => void } | undefined;
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1506,7 +1519,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
-        fleetWords && variant === "card"
+        fleetWords && variant === "card" && !isFirstMate
           ? "truncate text-xs font-normal text-muted-foreground"
           : fleetWords && isFirstMate
             ? "truncate font-semibold text-pink-950 dark:text-pink-50"
@@ -1537,6 +1550,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {displayTitle}
     </span>
   );
+  const prototypeLane = props.prototypeLane;
+  const laneToggle = prototypeLane ? (
+    <button
+      type="button"
+      aria-expanded={prototypeLane.expanded}
+      aria-label={prototypeLane.expanded ? "Collapse workers" : "Expand workers"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        prototypeLane.onToggle();
+      }}
+      className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ChevronDownIcon
+        aria-hidden
+        className={cn("size-3.5 transition-transform", !prototypeLane.expanded && "-rotate-90")}
+      />
+    </button>
+  ) : null;
   const roleBadge = roleLabel ? (
     <span
       data-testid={`sidebar-fleet-role-${thread.id}`}
@@ -1603,7 +1635,28 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : null;
   const showPin =
     props.isPinned && (!sortable?.isDragging || (props.dragOverPinned && props.dropVerb === null));
-  const pinIndicator = showPin ? (
+  const prototypePinToggle = props.prototypePinToggle;
+  const pinIndicator = prototypePinToggle ? (
+    <button
+      type="button"
+      aria-label={props.isPinned ? "Unpin First Mate" : "Pin First Mate"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        prototypePinToggle();
+      }}
+      className={cn(
+        "inline-flex cursor-pointer items-center rounded-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        props.isPinned ? "text-muted-foreground/65" : "text-muted-foreground/35",
+      )}
+    >
+      {props.isPinned ? (
+        <PinIcon aria-hidden className="size-3 shrink-0" />
+      ) : (
+        <PinOffIcon aria-hidden className="size-3 shrink-0" />
+      )}
+    </button>
+  ) : showPin ? (
     props.pinningSupported && !sortable?.isDragging ? (
       <Tooltip>
         <TooltipTrigger
@@ -1687,6 +1740,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {draftIndicator}
             {title}
             {roleBadge}
+            {laneToggle}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1800,6 +1854,146 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const diff = latestTurnDiff(thread);
 
+  // A second mate in the words variants keeps its name line for the name:
+  // its status and time move to the task line.
+  const statusOnTaskLine = fleetWords !== undefined && thread.fleetRole === "second-mate";
+  const cardStatusSlot = (
+    <>
+      {/* The visible state owns this slot's width: status at rest,
+                  actions on hover/keyboard focus or while the popover is open. Keeping
+                  the hidden state out of flow lets the project label reclaim
+                  space without either state overlapping it. */}
+      {sortable?.isDragging ? (
+        dragDestination
+      ) : (
+        <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+          {/* Read-only status labels yield to the hover actions. Woke is
+                    itself an action, so it stays pointer-enabled and visible
+                    while the other controls appear beside it. */}
+          <span
+            className={cn(
+              isWokeStatus
+                ? "pointer-events-auto"
+                : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
+              "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+              snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
+            )}
+          >
+            {topStatus ? (
+              isWokeStatus ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Dismiss Woke notification"
+                        onClick={handleAcknowledgeWokeClick}
+                        className={cn(
+                          "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                          topStatus.className,
+                        )}
+                      >
+                        <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
+                        <span role="status">{topStatus.label}</span>
+                      </button>
+                    }
+                  />
+                  <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                </Tooltip>
+              ) : (
+                <span
+                  className={cn("inline-flex items-center gap-1 font-medium", topStatus.className)}
+                >
+                  {topStatus.icon === "working" ? (
+                    <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                  ) : topStatus.icon === "input" ? (
+                    <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
+                  ) : topStatus.icon === "approval" ? (
+                    <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
+                  ) : topStatus.icon === "failed" ? (
+                    <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
+                  ) : topStatus.icon === "monitoring" ? (
+                    <EyeIcon aria-hidden className="size-4 shrink-0" />
+                  ) : topStatus.icon === "done" ? (
+                    <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+                  ) : null}
+                  {/* The label alone is the live region: a role="status"
+                            wrapper around the ticking duration would make
+                            screen readers announce every second. */}
+                  <span role="status">{topStatus.label}</span>
+                  {status === "working" ? (
+                    <span aria-hidden>
+                      <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                    </span>
+                  ) : null}
+                </span>
+              )
+            ) : (
+              threadTimeLabel(thread)
+            )}
+          </span>
+          {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
+            <span
+              className={cn(
+                // focus-visible, not focus-within: a mouse click leaves
+                // the Settle button focused, and a plain focus-within
+                // would keep the controls pinned over the status label
+                // once the pointer moves away (e.g. after a failed
+                // settle) instead of cross-fading back.
+                "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
+                snoozeMenuOpen && "pointer-events-auto static opacity-100",
+              )}
+            >
+              {hasUnsentDraft ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Discard draft"
+                        onClick={handleDiscardDraftClick}
+                        className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                      />
+                    }
+                  >
+                    <XIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Discard draft</TooltipPopup>
+                </Tooltip>
+              ) : null}
+              {showSnoozeButton ? (
+                <SnoozeMenuButton
+                  open={snoozeMenuOpen}
+                  onOpenChange={setSnoozeMenuOpen}
+                  onSnooze={handleSnoozePreset}
+                  timestampFormat={props.timestampFormat}
+                />
+              ) : null}
+              {props.settlementSupported ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Settle thread"
+                        onClick={handleSettleClick}
+                        className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                      />
+                    }
+                  >
+                    <CheckIcon className="size-3.5" />
+                    Settle
+                  </TooltipTrigger>
+                  <TooltipPopup>Settle thread</TooltipPopup>
+                </Tooltip>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
+      )}
+    </>
+  );
+
   return (
     <li
       data-thread-item
@@ -1871,6 +2065,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     </span>
                   ) : null}
                   {roleBadge}
+                  {laneToggle}
                   {fleetWords ? null : props.projectDisplayName === null ||
                     roleBadge !== null ||
                     (props.inFleetTree && thread.fleetRole) ? (
@@ -1879,144 +2074,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </>
               )}
               {pinIndicator}
-              {/* The visible state owns this slot's width: status at rest,
-                  actions on hover/keyboard focus or while the popover is open. Keeping
-                  the hidden state out of flow lets the project label reclaim
-                  space without either state overlapping it. */}
-              {sortable?.isDragging ? (
-                dragDestination
-              ) : (
-                <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
-                  {/* Read-only status labels yield to the hover actions. Woke is
-                    itself an action, so it stays pointer-enabled and visible
-                    while the other controls appear beside it. */}
-                  <span
-                    className={cn(
-                      isWokeStatus
-                        ? "pointer-events-auto"
-                        : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
-                      "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
-                      snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
-                    )}
-                  >
-                    {topStatus ? (
-                      isWokeStatus ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Dismiss Woke notification"
-                                onClick={handleAcknowledgeWokeClick}
-                                className={cn(
-                                  "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
-                                  topStatus.className,
-                                )}
-                              >
-                                <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
-                                <span role="status">{topStatus.label}</span>
-                              </button>
-                            }
-                          />
-                          <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
-                        </Tooltip>
-                      ) : (
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            topStatus.className,
-                          )}
-                        >
-                          {topStatus.icon === "working" ? (
-                            <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "input" ? (
-                            <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "approval" ? (
-                            <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "failed" ? (
-                            <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "monitoring" ? (
-                            <EyeIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "done" ? (
-                            <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
-                          ) : null}
-                          {/* The label alone is the live region: a role="status"
-                            wrapper around the ticking duration would make
-                            screen readers announce every second. */}
-                          <span role="status">{topStatus.label}</span>
-                          {status === "working" ? (
-                            <span aria-hidden>
-                              <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
-                            </span>
-                          ) : null}
-                        </span>
-                      )
-                    ) : (
-                      threadTimeLabel(thread)
-                    )}
-                  </span>
-                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
-                    <span
-                      className={cn(
-                        // focus-visible, not focus-within: a mouse click leaves
-                        // the Settle button focused, and a plain focus-within
-                        // would keep the controls pinned over the status label
-                        // once the pointer moves away (e.g. after a failed
-                        // settle) instead of cross-fading back.
-                        "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
-                        snoozeMenuOpen && "pointer-events-auto static opacity-100",
-                      )}
-                    >
-                      {hasUnsentDraft ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Discard draft"
-                                onClick={handleDiscardDraftClick}
-                                className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                              />
-                            }
-                          >
-                            <XIcon className="size-3.5" />
-                          </TooltipTrigger>
-                          <TooltipPopup side="top">Discard draft</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                      {showSnoozeButton ? (
-                        <SnoozeMenuButton
-                          open={snoozeMenuOpen}
-                          onOpenChange={setSnoozeMenuOpen}
-                          onSnooze={handleSnoozePreset}
-                          timestampFormat={props.timestampFormat}
-                        />
-                      ) : null}
-                      {props.settlementSupported ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Settle thread"
-                                onClick={handleSettleClick}
-                                className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                              />
-                            }
-                          >
-                            <CheckIcon className="size-3.5" />
-                            Settle
-                          </TooltipTrigger>
-                          <TooltipPopup>Settle thread</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                    </span>
-                  ) : null}
-                </span>
-              )}
+              {statusOnTaskLine ? null : cardStatusSlot}
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-1 flex min-w-0 items-baseline">
               {title}
+              {statusOnTaskLine ? (
+                <span className="ml-2 flex shrink-0 items-center gap-1.5 text-xs">
+                  {cardStatusSlot}
+                </span>
+              ) : null}
+              {/* Short worker cards drop the third line, so the model moves up. */}
+              {fleetWords === "compact" ? (
+                <span className="ml-2 shrink-0 whitespace-nowrap text-xs text-muted-foreground/60">
+                  {modelLabel}
+                </span>
+              ) : null}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
@@ -2267,147 +2339,6 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
     </li>
   );
 });
-
-// MOCKUP ONLY: picks one of three fleet layouts for design review.
-type FleetMockup = "a" | "b" | "c" | "bw" | "bwc";
-const FLEET_MOCKUPS: readonly string[] = ["a", "b", "c", "bw", "bwc"];
-const FLEET_MOCKUP: FleetMockup | null = (() => {
-  if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem("t3.fleetMockup");
-  return value !== null && FLEET_MOCKUPS.includes(value) ? (value as FleetMockup) : null;
-})();
-
-type FleetRowLayout = {
-  readonly variant?: "card" | "slim";
-  readonly rowClassName?: string;
-  readonly words?: "full" | "compact" | undefined;
-};
-
-function FleetHeaderRow(props: { label: string }) {
-  return (
-    <li className="mx-0.5 flex h-8 list-none items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground/60">
-      <span className="shrink-0">{props.label}</span>
-      <span aria-hidden className="h-px min-w-2 flex-1 bg-sidebar-border/60" />
-    </li>
-  );
-}
-
-function renderFleetMockup(input: {
-  layout: FleetMockup | null;
-  firstMate: EnvironmentThreadShell | null;
-  branches: readonly FleetBranch<EnvironmentThreadShell>[];
-  renderRow: (
-    thread: EnvironmentThreadShell,
-    layout: FleetRowLayout | undefined,
-    locked: boolean,
-  ) => ReactNode;
-}): ReactNode[] | null {
-  const { layout, firstMate, branches, renderRow } = input;
-  if (layout === null) return null;
-  const items: ReactNode[] = [];
-  const count = branches.reduce(
-    (total, branch) => total + branch.workers.length + (branch.secondMate ? 1 : 0),
-    0,
-  );
-  if (layout === "a") {
-    if (firstMate) items.push(renderRow(firstMate, {}, true));
-    for (const branch of branches) {
-      if (branch.secondMate) {
-        items.push(
-          renderRow(
-            branch.secondMate,
-            { rowClassName: "ml-3.5 border-l border-sidebar-border pl-2" },
-            true,
-          ),
-        );
-      }
-      for (const worker of branch.workers) {
-        items.push(
-          renderRow(
-            worker,
-            {
-              variant: "slim",
-              rowClassName:
-                "relative ml-3.5 border-l border-sidebar-border pl-6 before:absolute before:inset-y-0 before:left-[1.1rem] before:w-px before:bg-sidebar-border",
-            },
-            false,
-          ),
-        );
-      }
-    }
-    items.push(<li key="fleet-gap" aria-hidden className="h-2 list-none" />);
-    return items;
-  }
-  if (layout === "b" || layout === "bw" || layout === "bwc") {
-    const words = layout === "b" ? undefined : "full";
-    const workerWords = layout === "bwc" ? "compact" : words;
-    if (firstMate) {
-      items.push(
-        renderRow(
-          firstMate,
-          {
-            variant: "slim",
-            words,
-            rowClassName: words
-              ? "sticky top-0 z-20 mb-1 rounded-lg bg-pink-100 ring-1 ring-pink-500/40 dark:bg-pink-900/45 dark:ring-pink-400/35"
-              : "sticky top-0 z-20 mb-1 rounded-lg bg-pink-50 ring-1 ring-pink-500/30 dark:bg-pink-950/60 dark:ring-pink-400/30",
-          },
-          true,
-        ),
-      );
-    }
-    items.push(<FleetHeaderRow key="fleet-header" label="Fleet" />);
-    branches.forEach((branch, index) => {
-      if (index > 0)
-        items.push(<li key={`lane-gap-${branch.repo}`} aria-hidden className="h-1.5 list-none" />);
-      if (branch.secondMate) {
-        items.push(
-          renderRow(
-            branch.secondMate,
-            { words, rowClassName: "border-l-2 border-sky-500/60 pl-1 dark:border-sky-400/60" },
-            true,
-          ),
-        );
-      }
-      for (const worker of branch.workers) {
-        items.push(
-          renderRow(
-            worker,
-            {
-              words: workerWords,
-              rowClassName: "ml-3 border-l-2 border-sky-500/20 pl-1 dark:border-sky-400/20",
-            },
-            false,
-          ),
-        );
-      }
-    });
-    items.push(<FleetHeaderRow key="threads-header" label="Threads" />);
-    return items;
-  }
-  items.push(
-    <FleetHeaderRow key="fleet-header" label={`Fleet (${count + (firstMate ? 1 : 0)})`} />,
-  );
-  if (firstMate) items.push(renderRow(firstMate, { variant: "slim" }, true));
-  for (const branch of branches) {
-    if (branch.secondMate) items.push(renderRow(branch.secondMate, { variant: "slim" }, true));
-    for (const worker of branch.workers) {
-      items.push(
-        renderRow(
-          worker,
-          {
-            variant: "slim",
-            rowClassName:
-              "relative pl-6 before:absolute before:inset-y-1 before:left-[1.1rem] before:w-px before:bg-sidebar-border",
-          },
-          false,
-        ),
-      );
-    }
-  }
-  items.push(<FleetHeaderRow key="threads-header" label="Threads" />);
-  return items;
-}
 
 export default function Sidebar() {
   const projects = useProjects();
@@ -2791,6 +2722,42 @@ export default function Sidebar() {
         override holds until all of them appear in canonical state. */
     readonly assignedKeys: ReadonlyMap<string, string>;
   } | null>(null);
+  // PROTOTYPE: ?variant= swaps the fleet rows for mock ones, dev builds only.
+  const fleetPrototypeVariant = useFleetPrototypeVariant();
+  const prototypeFirstMateRunning = usePrototypeFirstMateRunning();
+  const [prototypeFirstMatePinned, setPrototypeFirstMatePinned] = useState(true);
+  const [prototypeCollapsed, setPrototypeCollapsed] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const prototypeFleetThreads = useMemo(
+    () =>
+      fleetPrototypeVariant !== null && primaryEnvironmentId !== null
+        ? buildPrototypeFleetThreads(primaryEnvironmentId, Date.now())
+        : [],
+    [fleetPrototypeVariant, primaryEnvironmentId],
+  );
+  const prototypeFleetState = useMemo<FleetPrototypeState>(() => {
+    const note = (description: string) =>
+      toastManager.add({ type: "info", title: "Prototype", description });
+    return {
+      firstMateRunning: prototypeFirstMateRunning,
+      firstMatePinned: prototypeFirstMatePinned,
+      collapsed: prototypeCollapsed,
+      onTogglePin: () => setPrototypeFirstMatePinned((pinned) => !pinned),
+      onStartFirstMate: () => {
+        setPrototypeFirstMateRunning(true);
+        note("Starts a First Mate thread. Nothing was sent.");
+      },
+      onOpenFirstMate: () => note("Opens the First Mate thread. Nothing was sent."),
+      onRowClick: (title) => note(`Opens "${title}". Mock row, nothing was sent.`),
+      onToggleLane: (repo) =>
+        setPrototypeCollapsed((previous) => {
+          const next = new Set(previous);
+          if (!next.delete(repo)) next.add(repo);
+          return next;
+        }),
+    };
+  }, [prototypeCollapsed, prototypeFirstMatePinned, prototypeFirstMateRunning]);
   const {
     firstMateThreads,
     fleetBranches,
@@ -2809,22 +2776,36 @@ export default function Sidebar() {
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
     // First Mate takes its own slot above every section, whatever the scope.
-    const { slot: firstMate, rest } = partitionFirstMateThreads(threads);
+    const sourceThreads =
+      prototypeFleetThreads.length > 0
+        ? [
+            ...threads.filter((thread) => !thread.fleetRole),
+            ...prototypeFleetThreads.filter(
+              (thread) => prototypeFirstMateRunning || !isFirstMateThread(thread),
+            ),
+          ]
+        : threads;
+    const { slot: firstMate, rest } = partitionFirstMateThreads(sourceThreads);
     const inScope = rest.filter(
       (thread) =>
         thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
+        (isPrototypeThread(thread) ||
+          scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
     // Second mates and their workers sit in a fixed tree; a settled or
     // snoozed worker drops to the shelves like any other thread.
-    const fleetTree = buildFleetTree(inScope, (thread) => {
-      const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-      return (
-        (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow })) ||
-        (capabilities?.threadSettlement === true && thread.settledOverride === "settled")
-      );
-    });
+    const fleetTree =
+      prototypeFleetThreads.length === 0
+        ? { branches: [], rest: inScope }
+        : buildFleetTree(inScope, (thread) => {
+            const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+            return (
+              (capabilities?.threadSnooze === true &&
+                effectiveSnoozed(thread, { now: preciseNow })) ||
+              (capabilities?.threadSettlement === true && thread.settledOverride === "settled")
+            );
+          });
     const visible = fleetTree.rest;
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2912,7 +2893,16 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    nowMinute,
+    optimisticDrop,
+    prototypeFirstMateRunning,
+    prototypeFleetThreads,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threads,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -4861,15 +4851,14 @@ export default function Sidebar() {
               }
               onNewProject={openAddProjectCommandPalette}
               firstMateAction={
-                FLEET_MOCKUP === "a" ? (
+                fleetPrototypeVariant === "A" ? (
                   <SidebarHeaderIconButton
-                    label={firstMateThreads.length > 0 ? "Open First Mate" : "Start First Mate"}
-                    onClick={() => {
-                      const firstMate = firstMateThreads[0];
-                      if (firstMate)
-                        navigateToThread(scopeThreadRef(firstMate.environmentId, firstMate.id));
-                      else handleStartFirstMate();
-                    }}
+                    label={prototypeFirstMateControlLabel(prototypeFirstMateRunning)}
+                    onClick={
+                      prototypeFirstMateRunning
+                        ? prototypeFleetState.onOpenFirstMate
+                        : prototypeFleetState.onStartFirstMate
+                    }
                   >
                     <FirstMateIcon />
                   </SidebarHeaderIconButton>
@@ -5000,11 +4989,7 @@ export default function Sidebar() {
                         // The First Mate slot: always a pinned card, and none of
                         // the lifecycle moves that would take it out of the slot.
                         firstMateSlot = false,
-                        fleetLayout?: {
-                          readonly variant?: "card" | "slim";
-                          readonly rowClassName?: string;
-                          readonly words?: "full" | "compact" | undefined;
-                        },
+                        fleetLayout?: FleetRowLayout,
                       ) => {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
@@ -5025,6 +5010,8 @@ export default function Sidebar() {
                             rowClassName={fleetLayout?.rowClassName}
                             inFleetTree={fleetLayout !== undefined}
                             fleetWords={fleetLayout?.words}
+                            prototypePinToggle={fleetLayout?.onTogglePin}
+                            prototypeLane={fleetLayout?.lane}
                             // Snoozed rows wake, settled rows un-settle, and cards settle.
                             variantAction={
                               section === "snoozed"
@@ -5049,8 +5036,10 @@ export default function Sidebar() {
                                 .threadPinning === true
                             }
                             isPinned={
-                              (firstMateSlot && isFirstMateThread(thread)) ||
-                              thread.pinnedAt != null
+                              fleetLayout?.onTogglePin
+                                ? prototypeFleetState.firstMatePinned
+                                : (firstMateSlot && isFirstMateThread(thread)) ||
+                                  thread.pinnedAt != null
                             }
                             sortable={sortable}
                             dropVerb={
@@ -5099,15 +5088,30 @@ export default function Sidebar() {
                               EMPTY_PROVIDER_ENTRIES
                             }
                             timestampFormat={timestampFormat}
-                            onThreadClick={handleThreadClick}
-                            onThreadActivate={navigateToThread}
+                            onThreadClick={
+                              isPrototypeThread(thread)
+                                ? () =>
+                                    isFirstMateThread(thread)
+                                      ? prototypeFleetState.onOpenFirstMate()
+                                      : prototypeFleetState.onRowClick(threadDisplayTitle(thread))
+                                : handleThreadClick
+                            }
+                            onThreadActivate={
+                              isPrototypeThread(thread)
+                                ? () => prototypeFleetState.onRowClick(threadDisplayTitle(thread))
+                                : navigateToThread
+                            }
                             onStartRename={startThreadRename}
                             onRenameTitleChange={setRenamingTitle}
                             onCommitRename={commitThreadRename}
                             onCancelRename={cancelThreadRename}
                             isRenaming={renamingThreadKey === threadKey}
                             renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
-                            onContextMenu={handleThreadContextMenu}
+                            onContextMenu={
+                              isPrototypeThread(thread)
+                                ? () => prototypeFleetState.onRowClick(threadDisplayTitle(thread))
+                                : handleThreadContextMenu
+                            }
                             onSettle={attemptSettle}
                             onUnsettle={attemptUnsettle}
                             onSnooze={attemptSnooze}
@@ -5140,13 +5144,17 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
-                      const fleetItems = renderFleetMockup({
-                        layout: FLEET_MOCKUP,
-                        firstMate: firstMateThreads[0] ?? null,
-                        branches: fleetBranches,
-                        renderRow: (thread, layout, locked) =>
-                          renderThreadRowInner(thread, "active", undefined, locked, layout),
-                      });
+                      const fleetItems =
+                        fleetPrototypeVariant === null
+                          ? null
+                          : renderFleetPrototype({
+                              variant: fleetPrototypeVariant,
+                              firstMate: firstMateThreads[0] ?? null,
+                              branches: fleetBranches,
+                              state: prototypeFleetState,
+                              renderRow: (thread, layout, locked) =>
+                                renderThreadRowInner(thread, "active", undefined, locked, layout),
+                            });
                       const items: ReactNode[] = [
                         ...(fleetItems !== null
                           ? fleetItems

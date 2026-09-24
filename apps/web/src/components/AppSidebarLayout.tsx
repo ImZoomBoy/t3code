@@ -33,6 +33,7 @@ import {
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
+import { FleetSidebarPrototypeBar } from "./sidebar/FleetSidebarPrototype";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
@@ -327,6 +328,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         {children}
         <SidebarControl />
         <NavigationHistoryShortcuts />
+        {/* PROTOTYPE: renders only in dev with ?variant= set. */}
+        <FleetSidebarPrototypeBar />
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
   );
