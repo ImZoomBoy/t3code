@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { partitionFirstMateThreads } from "../Sidebar.logic";
-import {
-  assignSecondMateTones,
-  buildFleetRows,
-  buildFleetTree,
-  planFirstMateSlot,
-  SECOND_MATE_TONES,
-} from "./fleetSidebar.logic";
+import { buildFleetRows, buildFleetTree, planFirstMateSlot } from "./fleetSidebar.logic";
 
 type Role = "first-mate" | "second-mate" | "worker";
 
@@ -165,6 +159,20 @@ describe("buildFleetRows", () => {
     ]);
   });
 
+  it("colours each worker from its second mate's project icon", () => {
+    const rows = rowsFor([
+      thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
+      thread("w", { fleetRole: "worker", fleetRepo: "t3code" }),
+      thread("stray", { fleetRole: "worker", fleetRepo: "elsewhere" }),
+    ]);
+    expect(rows.map((row) => [row.thread.id, row.theme.id])).toEqual([
+      ["sm", "sm"],
+      ["w", "sm"],
+      // A worker with no second mate takes its own project icon.
+      ["stray", "stray"],
+    ]);
+  });
+
   it("hides a folded second mate's workers and shows them again when unfolded", () => {
     const fleet = [
       thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
@@ -195,20 +203,5 @@ describe("buildFleetRows", () => {
       ["sm-pinned", null, "unpin-only"],
       ["sm-plain", null, "none"],
     ]);
-  });
-});
-
-describe("assignSecondMateTones", () => {
-  it("gives the same repository the same colour whatever order the fleet arrives in", () => {
-    const repos = ["t3code", "firstmate", "lavish-axi"];
-    const first = assignSecondMateTones(repos);
-    const again = assignSecondMateTones(repos.toReversed());
-    for (const repo of repos) expect(again.get(repo)).toBe(first.get(repo));
-  });
-
-  it("gives six second mates six different colours", () => {
-    expect(SECOND_MATE_TONES.length).toBeGreaterThanOrEqual(6);
-    const repos = ["firstmate", "t3code", "lavish-axi", "agos", "printworks", "site"];
-    expect(new Set(assignSecondMateTones(repos).values()).size).toBe(6);
   });
 });

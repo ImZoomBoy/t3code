@@ -164,11 +164,11 @@ import { FleetRoleIcon } from "./FleetRoleIcon";
 import {
   buildFleetRows,
   buildFleetTree,
+  FIRST_MATE_TONE_CLASS,
   FLEET_ROLE_WORDS,
-  FLEET_TONE_CLASSES,
   type FleetParked,
-  type FleetTone,
 } from "./sidebar/fleetSidebar.logic";
+import { FleetTone, type FleetTheme } from "./sidebar/FleetTone";
 import { resolveReadOnlyThreadModel } from "./chat/readOnlyThreadModel.logic";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
@@ -992,9 +992,11 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
  */
 interface FleetRowPlacement {
   readonly depth: 0 | 1;
-  readonly tone: FleetTone;
+  readonly theme: FleetTheme;
   /** A worker: its second mate's colour, faded, at regular weight. */
   readonly quiet: boolean;
+  /** Settled or snoozed: drawn dimmed in place, with its way back. */
+  readonly parked: FleetParked;
   readonly lifecycle: "none" | "undo-only" | "default";
   readonly pin: "none" | "unpin-only" | "default" | "toggle";
   readonly fold?: { readonly expanded: boolean; readonly onToggle: () => void } | undefined;
@@ -1002,8 +1004,9 @@ interface FleetRowPlacement {
 
 const FIRST_MATE_PLACEMENT: FleetRowPlacement = {
   depth: 0,
-  tone: "first-mate",
+  theme: { kind: "first-mate" },
   quiet: false,
+  parked: null,
   lifecycle: "none",
   pin: "toggle",
 };
@@ -1267,10 +1270,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         models: providerEntry?.models ?? [],
       }).thinkingLabel
     : null;
-  // A worker wears its second mate's colour, quieter.
-  const fleetToneClassName = fleet
-    ? cn(FLEET_TONE_CLASSES[fleet.tone], fleet.quiet && "opacity-70")
-    : undefined;
+  // The role mark and word wear the colour of the second mate's project icon;
+  // a worker wears it quieter.
+  const fleetRoleIcon =
+    fleet && fleetRole ? (
+      <FleetTone theme={fleet.theme}>
+        {(tone) => (
+          <FleetRoleIcon
+            role={fleetRole}
+            data-fleet-tone={tone.source}
+            className={cn(tone.className, fleet.quiet && "opacity-70")}
+            style={tone.style}
+          />
+        )}
+      </FleetTone>
+    ) : null;
   const displayTitle = threadDisplayTitle(thread);
 
   // The local environment is "this machine" and needs no marker; every other
@@ -1478,7 +1492,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none",
-    variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
+    variantAction === "unsettle" &&
+      fleet === undefined &&
+      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive
       ? "bg-sidebar-row-active text-sidebar-foreground"
       : isSelected
@@ -1740,7 +1756,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {/* A parked fleet row keeps its role mark, so it still reads as
               part of the tree it sits in. */}
-            {fleetRole ? <FleetRoleIcon role={fleetRole} className={fleetToneClassName} /> : null}
+            {fleetRoleIcon}
             {draftIndicator}
             {title}
             {roleBadge}
@@ -1888,7 +1904,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div
+            className={cn(
+              "relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]",
+              // A parked fleet row keeps its full shape, dimmed until you reach for it.
+              fleet?.parked &&
+                "opacity-55 transition-opacity group-focus-within/sidebar-row:opacity-100 group-hover/sidebar-row:opacity-100",
+            )}
+          >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {isFirstMate ? (
@@ -1903,9 +1926,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   {props.project ? (
                     <ProjectFavicon project={props.project} className="size-4 shrink-0" />
                   ) : null}
-                  {fleetRole ? (
-                    <FleetRoleIcon role={fleetRole} className={fleetToneClassName} />
-                  ) : null}
+                  {fleetRoleIcon}
                   {/* A second mate's label already names its repository, so it
                       stands in for the project name rather than crowding it. */}
                   {props.projectDisplayName &&
@@ -2007,6 +2028,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   </span>
                   {props.settlementSupported ||
                   showSnoozeButton ||
+                  (variantAction === "unsnooze" && props.snoozeSupported) ||
                   hasUnsentDraft ||
                   showPinButton ? (
                     <span
@@ -2055,7 +2077,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           <TooltipPopup>Pin as the main First Mate</TooltipPopup>
                         </Tooltip>
                       ) : null}
-                      {showSnoozeButton ? (
+                      {variantAction === "unsnooze" ? (
+                        // A snoozed fleet row stays a full row in its place.
+                        props.snoozeSupported ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  type="button"
+                                  aria-label="Wake thread now"
+                                  onClick={handleUnsnoozeClick}
+                                  className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                                />
+                              }
+                            >
+                              <AlarmClockOffIcon className="size-3.5" />
+                              Wake
+                            </TooltipTrigger>
+                            <TooltipPopup>Wake thread now</TooltipPopup>
+                          </Tooltip>
+                        ) : null
+                      ) : showSnoozeButton ? (
                         <SnoozeMenuButton
                           open={snoozeMenuOpen}
                           onOpenChange={setSnoozeMenuOpen}
@@ -2063,7 +2105,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           timestampFormat={props.timestampFormat}
                         />
                       ) : null}
-                      {props.settlementSupported ? (
+                      {props.settlementSupported && variantAction === "unsettle" ? (
+                        // A settled fleet row stays a full row in its place.
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <button
+                                type="button"
+                                aria-label="Un-settle thread"
+                                onClick={handleUnsettleClick}
+                                className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                              />
+                            }
+                          >
+                            <Undo2Icon className="size-3.5" />
+                            Un-settle
+                          </TooltipTrigger>
+                          <TooltipPopup>Un-settle thread</TooltipPopup>
+                        </Tooltip>
+                      ) : props.settlementSupported && variantAction === "settle" ? (
                         <Tooltip>
                           <TooltipTrigger
                             render={
@@ -2115,11 +2175,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   data-testid={`sidebar-model-${thread.id}`}
                   className="shrink-0 whitespace-nowrap text-muted-foreground/70"
                 >
-                  {fleetRole ? (
+                  {fleet && fleetRole ? (
                     <>
-                      <span className={cn(fleetToneClassName, !fleet?.quiet && "font-medium")}>
-                        {FLEET_ROLE_WORDS[fleetRole]}
-                      </span>
+                      <FleetTone theme={fleet.theme}>
+                        {(tone) => (
+                          <span
+                            className={cn(
+                              tone.className,
+                              fleet.quiet ? "opacity-70" : "font-medium",
+                            )}
+                            style={tone.style}
+                          >
+                            {FLEET_ROLE_WORDS[fleetRole]}
+                          </span>
+                        )}
+                      </FleetTone>
                       {" \u00b7 "}
                     </>
                   ) : null}
@@ -2884,8 +2954,13 @@ export default function Sidebar() {
         section: row.parked ?? ("active" as const),
         placement: {
           depth: row.depth,
-          tone: row.tone,
+          theme: {
+            kind: "project",
+            project: projectByKey.get(`${row.theme.environmentId}:${row.theme.projectId}`) ?? null,
+            repo: row.theme.fleetRepo ?? "",
+          },
           quiet: row.quiet,
+          parked: row.parked,
           lifecycle: row.thread.fleetRole === "second-mate" ? "undo-only" : "default",
           pin: row.pin,
           fold: row.fold
@@ -2893,7 +2968,7 @@ export default function Sidebar() {
             : undefined,
         } satisfies FleetRowPlacement,
       })),
-    [fleetBranches, fleetParked, foldedFleetRepos, toggleFleetRepo],
+    [fleetBranches, fleetParked, foldedFleetRepos, projectByKey, toggleFleetRepo],
   );
   const fleetThreads = useMemo(() => fleetRows.map((row) => row.thread), [fleetRows]);
 
@@ -4974,7 +5049,9 @@ export default function Sidebar() {
                         // row: every other thread is a full card. Density comes
                         // from users (or the auto rules) actually parking work,
                         // not from the sidebar second-guessing what still matters.
-                        const isCard = section === "active" || section === "pinned";
+                        // Fleet rows stay full rows when parked, so the tree keeps one shape.
+                        const isCard =
+                          fleet !== undefined || section === "active" || section === "pinned";
                         const rowVariant = isCard ? "card" : "slim";
                         return (
                           <SidebarThreadRow
@@ -5117,7 +5194,7 @@ export default function Sidebar() {
                                   className="flex h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-[var(--sidebar-row-content-inset)] text-left text-sm font-medium outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
                                 >
                                   <FirstMateIcon />
-                                  <span className={FLEET_TONE_CLASSES["first-mate"]}>
+                                  <span className={FIRST_MATE_TONE_CLASS}>
                                     {startingFirstMate
                                       ? "Starting First Mate…"
                                       : "Start First Mate"}

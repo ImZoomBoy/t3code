@@ -116,71 +116,8 @@ export function buildFleetTree<T extends FleetThread>(
   return { branches, rest };
 }
 
-/** A text colour a fleet row can wear. */
-export type FleetTone =
-  | "first-mate"
-  | "sky"
-  | "teal"
-  | "indigo"
-  | "violet"
-  | "lime"
-  | "fuchsia"
-  | "plain";
-
-/**
- * Colour classes per tone. First Mate's pink is its alone. The second mate
- * colours keep clear of the status colours (amber approval, red failure, green
- * done) and of each other, in shades picked to read in light and dark.
- */
-export const FLEET_TONE_CLASSES: Record<FleetTone, string> = {
-  "first-mate": "text-pink-600 dark:text-pink-400",
-  sky: "text-sky-700 dark:text-sky-300",
-  teal: "text-teal-700 dark:text-teal-300",
-  indigo: "text-indigo-600 dark:text-indigo-300",
-  violet: "text-violet-600 dark:text-violet-300",
-  lime: "text-lime-700 dark:text-lime-300",
-  fuchsia: "text-fuchsia-700 dark:text-fuchsia-300",
-  plain: "text-muted-foreground",
-};
-
-export const SECOND_MATE_TONES = [
-  "sky",
-  "teal",
-  "indigo",
-  "violet",
-  "lime",
-  "fuchsia",
-] as const satisfies readonly FleetTone[];
-
-function hashRepo(repo: string): number {
-  // FNV-1a: small, fast, and the same on every client.
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < repo.length; index += 1) {
-    hash ^= repo.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
-/**
- * Each second mate's colour index. A repository starts at the slot its name
- * hashes to and moves on to the next free one, visiting repositories in name
- * order, so the same fleet always gets the same colours and adding a
- * repository rarely moves anyone else's. Up to the palette size, every second
- * mate gets its own colour.
- */
-export function assignSecondMateTones(repos: readonly string[]): ReadonlyMap<string, number> {
-  const size = SECOND_MATE_TONES.length;
-  const assigned = new Map<string, number>();
-  const used = new Set<number>();
-  for (const repo of [...new Set(repos)].toSorted()) {
-    let slot = hashRepo(repo) % size;
-    for (let tries = 0; tries < size && used.has(slot); tries += 1) slot = (slot + 1) % size;
-    used.add(slot);
-    assigned.set(repo, slot);
-  }
-  return assigned;
-}
+/** First Mate's own colour. Second mates take theirs from their project icon. */
+export const FIRST_MATE_TONE_CLASS = "text-pink-600 dark:text-pink-400";
 
 /** A settled or snoozed fleet thread keeps its place, drawn quietly with its way back. */
 export type FleetParked = "settled" | "snoozed" | null;
@@ -189,7 +126,8 @@ export type FleetParked = "settled" | "snoozed" | null;
 export interface FleetRow<T> {
   readonly thread: T;
   readonly depth: 0 | 1;
-  readonly tone: FleetTone;
+  /** Whose project icon sets the row's colour: the second mate, for its workers too. */
+  readonly theme: T;
   /** A worker: its second mate's colour, faded, at regular weight. */
   readonly quiet: boolean;
   readonly parked: FleetParked;
@@ -203,8 +141,8 @@ export interface FleetRow<T> {
 }
 
 /**
- * The fleet tree as rows: each second mate in its colour, then its workers
- * indented under it unless folded. Parked threads stay in their place.
+ * The fleet tree as rows: each second mate, then its workers indented under it
+ * unless folded. Parked threads stay in their place.
  */
 export function buildFleetRows<T extends FleetThread>(
   branches: readonly FleetBranch<T>[],
@@ -213,20 +151,15 @@ export function buildFleetRows<T extends FleetThread>(
     readonly parkedState: (thread: T) => FleetParked;
   },
 ): FleetRow<T>[] {
-  const tones = assignSecondMateTones(
-    branches.flatMap((branch) => (branch.secondMate && branch.repo !== null ? [branch.repo] : [])),
-  );
   const rows: FleetRow<T>[] = [];
   for (const branch of branches) {
-    const toneIndex = branch.repo === null ? undefined : tones.get(branch.repo);
-    const tone: FleetTone = toneIndex === undefined ? "plain" : SECOND_MATE_TONES[toneIndex]!;
     const foldKey = branch.repo ?? "";
     const expanded = !options.isFolded(foldKey);
     if (branch.secondMate) {
       rows.push({
         thread: branch.secondMate,
         depth: 0,
-        tone,
+        theme: branch.secondMate,
         quiet: false,
         parked: options.parkedState(branch.secondMate),
         pin: branch.secondMate.pinnedAt != null ? "unpin-only" : "none",
@@ -238,7 +171,7 @@ export function buildFleetRows<T extends FleetThread>(
       rows.push({
         thread: worker,
         depth: branch.secondMate ? 1 : 0,
-        tone,
+        theme: branch.secondMate ?? worker,
         quiet: true,
         parked: options.parkedState(worker),
         pin: "default",
