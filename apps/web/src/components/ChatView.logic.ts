@@ -8,6 +8,7 @@ import {
   ProjectId,
   type MessageId,
   type ModelSelection,
+  type OrchestrationThreadShell,
   type PreviewAnnotationPayload,
   type ProviderInteractionMode,
   ProviderDriverKind,
@@ -1083,7 +1084,7 @@ export function getStartedThreadModelChangeBlockReason(input: {
  * or option change on the same instance to the live session instead.
  */
 export function getLiveBackgroundWorkRestartWarning(input: {
-  backgroundLiveness: "working" | "monitoring" | null | undefined;
+  backgroundLiveness: OrchestrationThreadShell["backgroundLiveness"];
   currentProviderInstanceId: ModelSelection["instanceId"] | null | undefined;
   nextModelSelection: ModelSelection;
 }): { title: string; description: string } | null {
