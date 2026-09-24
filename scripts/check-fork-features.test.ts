@@ -85,6 +85,36 @@ describe("check-fork-features", () => {
     );
   });
 
+  it("accepts several test files and claims and runs each", () => {
+    const [several] = parseForkFeatures(
+      JSON.stringify({ features: [feature({ test: ["a.test.ts", "b.test.ts"] })] }),
+    );
+
+    assert.deepEqual(
+      collectClaimedPaths([several!])
+        .filter((entry) => entry.kind === "test")
+        .map((entry) => entry.path),
+      ["a.test.ts", "b.test.ts"],
+    );
+    assert.deepEqual(planTestRuns([several!]), [["a.test.ts", "b.test.ts"]]);
+  });
+
+  it("rejects an empty test list, and a test name over several files", () => {
+    assert.throws(
+      () => parseForkFeatures(JSON.stringify({ features: [feature({ test: [] })] })),
+      /"test" must be a test file path/,
+    );
+    assert.throws(
+      () =>
+        parseForkFeatures(
+          JSON.stringify({
+            features: [feature({ test: ["a.test.ts", "b.test.ts"], testName: "one case" })],
+          }),
+        ),
+      /"testName" needs a single "test" file/,
+    );
+  });
+
   it("names the feature that lost a path", () => {
     const missing = findMissingPaths(
       [feature({ name: "terminal-poll", files: ["gone.ts"], test: "kept.test.ts" })],

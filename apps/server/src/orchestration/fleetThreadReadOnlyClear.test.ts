@@ -7,6 +7,7 @@ import {
   ThreadId,
   type FleetRole,
   type OrchestrationCommand,
+  WireOrchestrationCommand,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -15,6 +16,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 import { ServerConfig } from "../config.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -32,7 +34,7 @@ import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "./ThreadPlanProgress.ts";
 
 /**
- * The fleet opens a second mate's thread to the person.
+ * The fleet clears read-only on a second mate's thread, for the user.
  *
  * A second mate's thread is created read-only, so only First Mate prompts it.
  * `thread.read-only.clear` is how First Mate hands it over. These tests run
@@ -63,6 +65,12 @@ const engineLayer = (databasePath: string) =>
   );
 
 type Engine = OrchestrationEngineService | ProjectionSnapshotQuery;
+
+/** What `normalizeDispatchCommand` needs, as a dispatch entry point has it. */
+const normalizerLayer = Layer.mergeAll(
+  ServerConfig.layerTest(process.cwd(), { prefix: "t3-fleet-read-only-clear-normalizer-" }),
+  WorkspacePaths.layer,
+).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** One server lifetime over `databasePath`. */
 const withEngine = <A, E>(databasePath: string, effect: Effect.Effect<A, E, Engine>) =>
@@ -243,6 +251,76 @@ it.layer(NodeServices.layer)("thread.read-only.clear", (it) => {
     }),
   );
 
+  it.effect("refuses a raw client payload that spells issuer fleet", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-second-mate");
+      // What an ordinary client can put on the wire. The wire shape has no
+      // `issuer`, so decoding drops it, and the entry point stamps nothing
+      // for a client session.
+      const decoded = yield* Schema.decodeUnknownEffect(WireOrchestrationCommand)({
+        type: "thread.read-only.clear",
+        commandId: "clear-forged",
+        threadId,
+        createdAt: NOW,
+        issuer: "fleet",
+      });
+      expect(decoded).not.toHaveProperty("issuer");
+      const command = yield* normalizeDispatchCommand(decoded, "client").pipe(
+        Effect.provide(normalizerLayer),
+      );
+      expect(command).not.toHaveProperty("issuer");
+
+      yield* withEngine(
+        yield* makeDatabasePath,
+        Effect.gen(function* () {
+          yield* createProject;
+          yield* createThread(threadId, {
+            fleetRole: "second-mate",
+            readOnly: true,
+            issuer: "fleet",
+          });
+
+          expect(yield* errorMessage(dispatch(command))).toMatch(/Only the fleet may make thread/);
+          expect(yield* readOnlyEverywhere(threadId)).toEqual([true, true, true, true]);
+        }),
+      );
+    }),
+  );
+
+  it.effect("refuses an archived second mate thread and leaves it read-only", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-second-mate");
+      yield* withEngine(
+        yield* makeDatabasePath,
+        Effect.gen(function* () {
+          yield* createProject;
+          yield* createThread(threadId, {
+            fleetRole: "second-mate",
+            readOnly: true,
+            issuer: "fleet",
+          });
+          yield* dispatch({
+            type: "thread.archive",
+            commandId: CommandId.make("archive"),
+            threadId,
+          });
+
+          expect(yield* errorMessage(clear("clear-archived", threadId))).toMatch(
+            /is already archived/,
+          );
+          const snapshots = yield* ProjectionSnapshotQuery;
+          const shell = (yield* snapshots.getArchivedShellSnapshot()).threads.find(
+            (thread) => thread.id === threadId,
+          );
+          const command = (yield* snapshots.getCommandReadModel()).threads.find(
+            (thread) => thread.id === threadId,
+          );
+          expect([shell?.readOnly, command?.readOnly]).toEqual([true, true]);
+        }),
+      );
+    }),
+  );
+
   it.effect("accepts a clear on a promptable second mate thread and changes nothing", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-second-mate");
@@ -264,12 +342,7 @@ it.layer(NodeServices.layer)("thread.read-only.clear", (it) => {
   );
 });
 
-it.layer(
-  Layer.mergeAll(
-    ServerConfig.layerTest(process.cwd(), { prefix: "t3-fleet-read-only-clear-normalizer-" }),
-    WorkspacePaths.layer,
-  ).pipe(Layer.provideMerge(NodeServices.layer)),
-)("thread.read-only.clear at the dispatch entry point", (it) => {
+it.layer(normalizerLayer)("thread.read-only.clear at the dispatch entry point", (it) => {
   const wire = {
     type: "thread.read-only.clear",
     commandId: CommandId.make("clear"),

@@ -162,8 +162,8 @@
     },
     {
       "name": "fm-fleet-thread-read-only-clear",
-      "description": "The fleet can open a second mate's read-only thread to the person with thread.read-only.clear. Only the fleet issuer may send it, and only on a fleet-owned thread whose fleetRole is second-mate. It records a thread.read-only-cleared event that sets readOnly to false on the thread and its shell row, so it survives a restart and clients update. Nothing makes a thread read-only again. The server advertises fleetThreadReadOnlyClear in its environment capabilities.",
-      "keep": "fleetThreadReadOnlyClear.test.ts is ours whole. The thread.read-only.clear command, the thread.read-only-cleared event and payload, and the OrchestrationThread.readOnly comment survive in orchestration.ts; the fleetThreadReadOnlyClear capability survives in environment.ts and ServerEnvironment.ts; readOnlyClearRefusal survives in fleetThreads.ts; the issuer stamp for the command survives in Normalizer.ts; the command case survives in decider.ts; the event case survives in projector.ts, ProjectionPipeline.ts and threadReducer.ts; and the payload re-export survives in Schemas.ts. Everything else in those files takes upstream.",
+      "description": "The fleet can clear read-only on a second mate's thread with thread.read-only.clear, so the user can type into it. Only the fleet issuer may send it, and only on a fleet-owned, unarchived thread whose fleetRole is second-mate. It records a thread.read-only-cleared event that sets readOnly to false on the thread and its shell row, so it survives a restart and clients update. Nothing makes a thread read-only again. The server advertises fleetThreadReadOnlyClear in its environment capabilities.",
+      "keep": "fleetThreadReadOnlyClear.test.ts is ours whole. The thread.read-only-cleared case survives in threadReducer.test.ts, and the fleetThreadReadOnlyClear assertion survives in ServerEnvironment.test.ts. The thread.read-only.clear command, the thread.read-only-cleared event and payload, and the OrchestrationThread.readOnly comment survive in orchestration.ts; the fleetThreadReadOnlyClear capability survives in environment.ts and ServerEnvironment.ts; readOnlyClearRefusal survives in fleetThreads.ts; the issuer stamp for the command survives in Normalizer.ts; the command case survives in decider.ts; the event case survives in projector.ts, ProjectionPipeline.ts and threadReducer.ts; and the payload re-export survives in Schemas.ts. Everything else in those files takes upstream.",
       "files": [
         "packages/contracts/src/orchestration.ts",
         "packages/contracts/src/environment.ts",
@@ -176,7 +176,11 @@
         "apps/server/src/orchestration/Schemas.ts",
         "apps/server/src/orchestration/Layers/ProjectionPipeline.ts"
       ],
-      "test": "apps/server/src/orchestration/fleetThreadReadOnlyClear.test.ts",
+      "test": [
+        "apps/server/src/orchestration/fleetThreadReadOnlyClear.test.ts",
+        "packages/client-runtime/src/state/threadReducer.test.ts",
+        "apps/server/src/environment/ServerEnvironment.test.ts"
+      ],
       "patchesUpstream": true
     },
     {

@@ -879,7 +879,7 @@ export const OrchestrationThread = Schema.Struct({
   // A window onto work being driven somewhere else. The agent that owns this
   // conversation refuses to be prompted through it, so the client shows no way
   // to type. Set at creation. The fleet can clear it on a second mate's thread
-  // it owns, with `thread.read-only.clear`, to hand that thread to the person;
+  // it owns, with `thread.read-only.clear`, to hand that thread to the user;
   // nothing sets it again. Optional so old servers/clients interop; absent = false.
   readOnly: Schema.optional(Schema.Boolean),
   // The fleet created this thread, so the fleet may still prompt it even
@@ -1570,7 +1570,7 @@ const ThreadReadOnlyClearCommandFields = {
 } as const;
 
 /**
- * Makes a fleet-owned second mate thread promptable, so the person can type
+ * Makes a fleet-owned second mate thread promptable, so the user can type
  * into it. Only the fleet may send it, and there is no command that makes a
  * thread read-only again. `issuer` follows the same rule as
  * `ThreadTurnStartCommand.issuer`: a dispatch entry point stamps it from the
@@ -1588,9 +1588,10 @@ const WireThreadReadOnlyClearCommand = Schema.Struct(ThreadReadOnlyClearCommandF
  *
  * `thread.create` and `thread.turn.start` are the two that do not: each has a
  * narrow client shape and a wide server shape, and the three unions below
- * differ only in which of the two they pick. Written once here so the
- * twenty-one cannot drift between them. `thread.read-only.clear` is the
- * fleet's alone, so the client union leaves it out.
+ * differ in which of the two they pick. `thread.read-only.clear` is the third
+ * difference: the fleet's alone, so the wide and wire unions carry it and the
+ * client union leaves it out. Written once here so the twenty-one cannot drift
+ * between them.
  */
 const SharedOrchestrationCommands = [
   ProjectCreateCommand,
@@ -1656,7 +1657,8 @@ export type OrchestrationCommandIssuer = typeof OrchestrationCommandIssuer.Type;
  * before it knows who sent it.
  *
  * The client union with the wider `thread.create`, so a fleet create can
- * carry `readOnly` at all. Decoding once and then vetting the result is
+ * carry `readOnly` at all, and with `thread.read-only.clear` in its unstamped
+ * shape, so the fleet can send it at all. Decoding once and then vetting the result is
  * deliberate: there is one schema on the wire and one place that decides what
  * survives it. That place is `normalizeDispatchCommand`, which refuses a
  * `readOnly` an ordinary client sent rather than quietly dropping it, and

@@ -320,7 +320,7 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
-  it("opens a read-only thread when the fleet clears it", () => {
+  it("makes a read-only thread promptable when the fleet clears it", () => {
     const updatedAt = "2026-04-01T06:00:00.000Z";
     const result = applyThreadDetailEvent(
       { ...baseThread, readOnly: true, fleetOwned: true, fleetRole: "second-mate" },

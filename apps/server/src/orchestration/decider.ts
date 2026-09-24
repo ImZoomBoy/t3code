@@ -941,7 +941,7 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
     }
 
     case "thread.read-only.clear": {
-      const thread = yield* requireThread({
+      const thread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,

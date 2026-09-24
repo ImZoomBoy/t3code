@@ -1,4 +1,4 @@
-import type { FleetRole, OrchestrationThread } from "@t3tools/contracts";
+import type { FleetRole, OrchestrationCommand, OrchestrationThread } from "@t3tools/contracts";
 
 /** The First Mate thread, or a command that would create one. */
 export function isFirstMateThread(thread: {
@@ -10,13 +10,13 @@ export function isFirstMateThread(thread: {
 /**
  * Why the fleet may not make this thread promptable, or null when it may.
  *
- * Only a second mate's thread is handed to the person. A worker's thread stays
+ * Only a second mate's thread is handed to the user. A worker's thread stays
  * the worker's, the First Mate thread is never read-only to begin with, and a
- * thread the fleet did not create is not the fleet's to open.
+ * thread the fleet did not create is not the fleet's to clear.
  */
 export function readOnlyClearRefusal(
   thread: Pick<OrchestrationThread, "id" | "fleetOwned" | "fleetRole">,
-  issuer: "fleet" | undefined,
+  issuer: Extract<OrchestrationCommand, { type: "thread.read-only.clear" }>["issuer"],
 ): string | null {
   if (issuer !== "fleet") {
     return `Only the fleet may make thread '${thread.id}' promptable.`;
