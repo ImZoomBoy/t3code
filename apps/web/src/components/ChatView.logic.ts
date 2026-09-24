@@ -1077,6 +1077,29 @@ export function getStartedThreadModelChangeBlockReason(input: {
   };
 }
 
+/**
+ * A move to another provider instance needs a new session, and the restart
+ * ends the background work the thread still runs. The server applies a model
+ * or option change on the same instance to the live session instead.
+ */
+export function getLiveBackgroundWorkRestartWarning(input: {
+  backgroundLiveness: "working" | "monitoring" | null | undefined;
+  currentProviderInstanceId: ModelSelection["instanceId"] | null | undefined;
+  nextModelSelection: ModelSelection;
+}): { title: string; description: string } | null {
+  if (input.backgroundLiveness == null || input.currentProviderInstanceId == null) {
+    return null;
+  }
+  if (input.currentProviderInstanceId === input.nextModelSelection.instanceId) {
+    return null;
+  }
+  return {
+    title: "This switch restarts the session",
+    description:
+      "Background work in this thread stops when you send your next message. Switch back to keep it running.",
+  };
+}
+
 export async function waitForStartedServerThread(
   threadRef: ScopedThreadRef,
   timeoutMs = 1_000,
