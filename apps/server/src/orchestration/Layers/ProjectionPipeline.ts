@@ -799,6 +799,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.read-only-cleared": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            readOnly: 0,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.unpinned": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,

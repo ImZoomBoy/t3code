@@ -32,9 +32,13 @@ export interface ForkFeature {
   readonly keep: string;
   /** Every file the feature lives in, fork-only or patched from upstream. */
   readonly files: readonly string[];
-  /** Test file that fails on plain upstream without the feature. */
-  readonly test: string;
-  /** Narrows {@link test} to one named test inside that file. */
+  /**
+   * Test file that fails on plain upstream without the feature. A list when
+   * the feature's tests live in several files, such as an upstream test file
+   * the fork adds a case to.
+   */
+  readonly test: string | readonly string[];
+  /** Narrows a single {@link test} file to one named test inside it. */
   readonly testName?: string;
   /** True when any file in {@link files} also exists upstream. */
   readonly patchesUpstream: boolean;
@@ -52,6 +56,18 @@ export class ForkFeatureManifestError extends Error {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isTestPaths(value: unknown): value is ForkFeature["test"] {
+  return (
+    isNonEmptyString(value) ||
+    (Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString))
+  );
+}
+
+/** The test files a feature names, one or several. */
+export function testPathsOf(feature: ForkFeature): readonly string[] {
+  return typeof feature.test === "string" ? [feature.test] : feature.test;
 }
 
 /**
@@ -95,11 +111,13 @@ export function parseForkFeatures(source: string): readonly ForkFeature[] {
     ) {
       problems.push(`${label}: "files" must be a non-empty array of paths`);
     }
-    if (!isNonEmptyString(feature.test)) {
-      problems.push(`${label}: "test" must be a test file path`);
+    if (!isTestPaths(feature.test)) {
+      problems.push(`${label}: "test" must be a test file path or a non-empty array of them`);
     }
     if (feature.testName !== undefined && !isNonEmptyString(feature.testName)) {
       problems.push(`${label}: "testName" must be a string when present`);
+    } else if (feature.testName !== undefined && Array.isArray(feature.test)) {
+      problems.push(`${label}: "testName" needs a single "test" file`);
     }
     if (typeof feature.patchesUpstream !== "boolean") {
       problems.push(`${label}: "patchesUpstream" must be a boolean`);
@@ -122,7 +140,7 @@ export function collectClaimedPaths(
 ): readonly { readonly feature: string; readonly path: string; readonly kind: "file" | "test" }[] {
   return features.flatMap((feature) => [
     ...feature.files.map((path) => ({ feature: feature.name, path, kind: "file" as const })),
-    { feature: feature.name, path: feature.test, kind: "test" as const },
+    ...testPathsOf(feature).map((path) => ({ feature: feature.name, path, kind: "test" as const })),
   ]);
 }
 
@@ -145,9 +163,11 @@ export function planTestRuns(features: readonly ForkFeature[]): readonly (readon
 
   for (const feature of features) {
     if (feature.testName === undefined) {
-      if (!batched.includes(feature.test)) batched.push(feature.test);
+      for (const test of testPathsOf(feature)) {
+        if (!batched.includes(test)) batched.push(test);
+      }
     } else {
-      named.push([feature.test, "-t", feature.testName]);
+      named.push([...testPathsOf(feature), "-t", feature.testName]);
     }
   }
 

@@ -108,6 +108,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   inlineMessageContext: Schema.optionalKey(Schema.Boolean),
   /** Server rejects required worktrees instead of falling back to the project checkout. */
   requiredWorktreeBootstrap: Schema.optionalKey(Schema.Boolean),
+  /** Server accepts thread.read-only.clear from the fleet, which makes a
+      fleet-owned second mate thread promptable. Older servers refuse the
+      unknown command, so the fleet must not send it when this is absent. */
+  fleetThreadReadOnlyClear: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.settle / thread.unsettle commands. Absent on
       pre-settlement servers, so clients treat missing as unsupported and
       never send the commands under version skew. */
