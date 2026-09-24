@@ -2425,7 +2425,9 @@ const make = Effect.gen(function* () {
                 ? { providerInstanceId: event.providerInstanceId }
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: eventTurnId ?? null,
+              // An error without a turn id keeps the running turn named: the
+              // turn may go on, and a deferred turn start waits for it.
+              activeTurnId: eventTurnId ?? activeTurnId,
               lastError: runtimeErrorMessage,
               updatedAt: now,
             },

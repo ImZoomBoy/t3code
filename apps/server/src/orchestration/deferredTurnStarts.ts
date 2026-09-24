@@ -34,7 +34,6 @@ import type {
   OrchestrationDeferredTurnStart,
   OrchestrationEvent,
   OrchestrationReadModel,
-  OrchestrationSession,
   OrchestrationThread,
   ThreadId,
 } from "@t3tools/contracts";
@@ -80,12 +79,15 @@ type Project = (
 ) => Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError>;
 
 /**
- * A session with no turn running or starting. A `stopped` or `interrupted`
- * session ended and runs no turn unless it still names one; a turn start there
- * starts a new session, as a direct send does. An `error` session is not free:
- * a runtime error without a turn id leaves a live turn unnamed.
+ * The thread's session runs no turn and is not starting one. A session that
+ * ended (`stopped`, `interrupted`, `error`) is free once it names no active
+ * turn and the latest turn is not running; a turn start there starts a new
+ * session, as a direct send does. A runtime error without a turn id keeps the
+ * running turn named, so an `error` left by a failed turn is free and one
+ * raised mid-turn is not.
  */
-function sessionIsFree(session: OrchestrationSession | null): boolean {
+function sessionIsFree(thread: OrchestrationThread): boolean {
+  const session = thread.session ?? null;
   if (session === null) return true;
   switch (session.status) {
     case "idle":
@@ -93,8 +95,8 @@ function sessionIsFree(session: OrchestrationSession | null): boolean {
       return true;
     case "stopped":
     case "interrupted":
-      return session.activeTurnId === null;
     case "error":
+      return session.activeTurnId === null && thread.latestTurn?.state !== "running";
     case "starting":
     case "running":
       return false;
@@ -103,7 +105,7 @@ function sessionIsFree(session: OrchestrationSession | null): boolean {
 
 /** No turn is running or starting and none has been asked for. */
 export function threadIsFree(thread: OrchestrationThread): boolean {
-  return sessionIsFree(thread.session ?? null) && (thread.pendingTurnStart ?? null) === null;
+  return sessionIsFree(thread) && (thread.pendingTurnStart ?? null) === null;
 }
 
 /** A start that asks to queue waits behind anything busy and behind earlier waiting starts. */

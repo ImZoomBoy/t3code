@@ -241,12 +241,15 @@
     },
     {
       "name": "fm-turn-start-when-busy-ended-session",
-      "description": "A thread whose session stopped or was interrupted, with no active turn, counts as free for a turn start that asks to queue, so the start runs at once instead of becoming a deferred turn start that no event releases. An errored session stays not free, because a runtime error without a turn id leaves a live turn unnamed. A deferred turn start an older server left on such a thread runs at the next startup, through the startup release loop.",
-      "keep": "deferredTurnStarts.ts is ours whole, including the rule in sessionIsFree that counts a stopped or interrupted session with no active turn as free and an errored session as not free. Upstream has no file at that path, so nothing in it takes upstream.",
-      "files": ["apps/server/src/orchestration/deferredTurnStarts.ts"],
+      "description": "A thread whose session ended (stopped, interrupted or error) counts as free for a turn start that asks to queue once no turn is active and the latest turn is not running, so the start runs at once instead of becoming a deferred turn start that no event releases. A runtime error without a turn id keeps the running turn named in the session, so an error raised mid-turn keeps the thread busy while an error left by a failed turn frees it. A deferred turn start an older server left on such a thread runs at the next startup, through the startup release loop.",
+      "keep": "deferredTurnStarts.ts is ours whole, including the ended-session rule in sessionIsFree. In ProviderRuntimeIngestion.ts the runtime.error session-set keeps activeTurnId: eventTurnId ?? activeTurnId; everything else in that file takes upstream.",
+      "files": [
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts"
+      ],
       "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
-      "testName": "a turn start that asks to queue runs at once on a thread whose session stopped|a turn start that asks to queue waits on a thread whose session errored",
-      "patchesUpstream": false
+      "testName": "a turn start that asks to queue runs at once on a thread whose session stopped|a turn start that asks to queue runs at once after a failed turn|a turn start that asks to queue waits for a turn that raised a runtime error without a turn id",
+      "patchesUpstream": true
     },
     {
       "name": "fm-turn-start-when-busy-ended-session-restart-test",
