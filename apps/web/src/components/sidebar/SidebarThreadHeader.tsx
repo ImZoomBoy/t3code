@@ -32,8 +32,6 @@ export interface SidebarThreadHeaderProps {
   /** The project scope combobox, rendered as the first icon of the group. */
   projectScope: ReactNode;
   onNewProject: () => void;
-  /** Opens First Mate's thread, or starts one when none is live. */
-  firstMateAction?: ReactNode;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
@@ -56,7 +54,6 @@ export function SidebarThreadHeader({
   hasProjects,
   projectScope,
   onNewProject,
-  firstMateAction,
   onNewThread,
   newThreadDisabled,
   newThreadShortcutLabel,
@@ -135,7 +132,6 @@ export function SidebarThreadHeader({
             </SidebarHeaderIconButton>
           </>
         ) : null}
-        {firstMateAction}
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={
