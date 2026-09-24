@@ -183,6 +183,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       // A caller reads this before sending `whenBusy: "queue"`: an older server
       // leaves it out and would steer the message instead.
       expect(second.capabilities.turnStartWhenBusy).toBe(true);
+      // A caller reads this before sending `environment` with `whenBusy: "queue"`:
+      // a server that leaves it out refuses the pair.
+      expect(second.capabilities.turnStartWhenBusyEnvironment).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
     }),
   );

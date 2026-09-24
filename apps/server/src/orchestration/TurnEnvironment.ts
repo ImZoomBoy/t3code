@@ -8,11 +8,16 @@
  * takes it when it handles that command's `thread.turn-start-requested`.
  * Taking removes it, so a later turn on the same thread never inherits it.
  *
+ * A turn start that waits for a busy thread is held instead, by the engine
+ * that holds the start, until the start runs or is dropped. See
+ * `makeHeldTurnEnvironments`.
+ *
  * @module TurnEnvironment
  */
 import type {
   CommandId,
   OrchestrationCommand,
+  OrchestrationEvent,
   ProviderInstanceEnvironment,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -28,6 +33,13 @@ export const rememberTurnEnvironment = Effect.fnUntraced(function* (command: Orc
   if (command.type !== "thread.turn.start" || command.environment === undefined) {
     return;
   }
+  yield* parkTurnEnvironment(command.commandId, command.environment);
+});
+
+const parkTurnEnvironment = Effect.fnUntraced(function* (
+  commandId: CommandId,
+  environment: ProviderInstanceEnvironment,
+) {
   if (environmentsByCommandId.size >= MAX_PARKED_TURN_ENVIRONMENTS) {
     const oldest = environmentsByCommandId.keys().next();
     if (!oldest.done) {
@@ -40,8 +52,56 @@ export const rememberTurnEnvironment = Effect.fnUntraced(function* (command: Orc
       });
     }
   }
-  environmentsByCommandId.set(command.commandId, command.environment);
+  environmentsByCommandId.set(commandId, environment);
 });
+
+/**
+ * The environments of turn starts held for a busy thread, owned by one
+ * engine. They live exactly as long as that engine's process, which is what
+ * makes a held start that outlived a restart lose its environment: the decider
+ * asks `has` before it runs one, and drops it with `environment-lost` when
+ * the answer is no.
+ *
+ * No cap: every held start is removed by the event that runs or drops it.
+ */
+export function makeHeldTurnEnvironments() {
+  const held = new Map<CommandId, ProviderInstanceEnvironment>();
+  return {
+    has: (commandId: CommandId): boolean => held.has(commandId),
+    /**
+     * Takes one committed command and the events it wrote. A turn start that
+     * ran at once parks its environment, as a direct start does. One that was
+     * held keeps it here. A held start that ran parks its environment under its
+     * own command id, which is the id its `thread.turn-start-requested` carries,
+     * and one that was dropped lets its environment go.
+     */
+    remember: Effect.fnUntraced(function* (
+      command: OrchestrationCommand,
+      committedEvents: ReadonlyArray<OrchestrationEvent>,
+    ) {
+      for (const event of committedEvents) {
+        if (event.commandId === null) continue;
+        if (event.type === "thread.turn-start-requested") {
+          const environment = held.get(event.commandId);
+          if (environment === undefined) continue;
+          held.delete(event.commandId);
+          yield* parkTurnEnvironment(event.commandId, environment);
+        } else if (event.type === "thread.deferred-turn-start-dropped") {
+          held.delete(event.commandId);
+        }
+      }
+      if (
+        command.type === "thread.turn.start" &&
+        command.environment !== undefined &&
+        committedEvents.some((event) => event.type === "thread.turn-start-deferred")
+      ) {
+        held.set(command.commandId, command.environment);
+        return;
+      }
+      yield* rememberTurnEnvironment(command);
+    }),
+  };
+}
 
 export function takeTurnEnvironment(
   commandId: CommandId | null,

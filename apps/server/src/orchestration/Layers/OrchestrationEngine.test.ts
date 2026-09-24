@@ -2569,17 +2569,52 @@ describe("turn starts that wait for an idle thread", () => {
     }
   });
 
-  it("refuses a waiting turn start that carries an environment", async () => {
+  const wakeEnvironment = [{ name: "FM_HOME", value: "/tmp/fm-held", sensitive: false }];
+
+  it("holds a waiting turn start that carries an environment and starts it when free", async () => {
     const system = await seededThread("running");
     try {
-      await expect(
-        dispatch(
-          system,
-          queueWake({ environment: [{ name: "FM_HOME", value: "/tmp/fm", sensitive: false }] }),
-        ),
-      ).rejects.toThrow("cannot carry an environment");
+      await dispatch(system, queueWake({ environment: wakeEnvironment }));
+      const [held] = await eventsFor(system, "wake");
+      // The held start records that it had an environment, never its value.
+      expect(held?.type === "thread.turn-start-deferred" && held.payload.hasEnvironment).toBe(true);
+      expect(JSON.stringify(held)).not.toContain("/tmp/fm-held");
+
+      await dispatch(system, setSession("idle", "ready"));
+      expect(await typesFor(system, "wake")).toEqual([
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
     } finally {
       await system.dispose();
+    }
+  });
+
+  it("after a restart, drops a held start whose environment died with the process", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-deferred-turn-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    let system = await seededThread("running", databasePath);
+    try {
+      await dispatch(system, queueWake({ environment: wakeEnvironment }));
+      await dispatch(system, turnStart("second-wake", { whenBusy: "queue" }));
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+
+      await dispatch(system, setSession("idle-after-restart", "ready"));
+      const [, drop] = await eventsFor(system, "wake");
+      expect(drop?.type === "thread.deferred-turn-start-dropped" && drop.payload.reason).toBe(
+        "environment-lost",
+      );
+      // The start behind it runs rather than wait on the dropped one.
+      expect(await typesFor(system, "second-wake")).toEqual([
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
     }
   });
 });

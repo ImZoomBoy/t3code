@@ -6,6 +6,7 @@ import {
   MessageId,
   ProjectId,
   ProviderDriverKind,
+  ProviderInstanceEnvironment,
   ProviderInstanceId,
   type OrchestrationCommand,
   type ProviderSendTurnInput,
@@ -19,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { HttpServer } from "effect/unstable/http";
@@ -56,6 +58,8 @@ const stoppedBindingResumeCursor = {
   schemaVersion: 1,
   sessionId: "provider-session-stopped-before-restart",
 };
+
+const decodeProviderEnvironment = Schema.decodeUnknownSync(ProviderInstanceEnvironment);
 
 const makePersistedRuntimeLayer = (dbPath: string) => {
   const persistence = makeSqlitePersistenceLive(dbPath);
@@ -620,6 +624,129 @@ it.effect("settles deferred turn starts through startup after a restart", () =>
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-startup-deferred-turn-starts-" }).pipe(
         Layer.provideMerge(NodeServices.layer),
       ),
+    ),
+  ),
+);
+
+it.effect("drops a deferred turn start whose environment a restart lost", () =>
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const createdAt = DateTime.formatIso(yield* DateTime.now);
+    const lostEnvironmentThreadId = ThreadId.make("thread-deferred-environment-lost");
+    const toolDir = "/opt/fm/restart-bin";
+    const environment = decodeProviderEnvironment([{ name: "PATH", value: toolDir }]);
+    const turnStart = (
+      id: string,
+      options?: { readonly queue?: boolean; readonly environment?: ProviderInstanceEnvironment },
+    ): OrchestrationCommand => ({
+      type: "thread.turn.start",
+      commandId: CommandId.make(id),
+      threadId: lostEnvironmentThreadId,
+      message: {
+        messageId: MessageId.make(`message-${id}`),
+        role: "user",
+        text: `message from ${id}`,
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "full-access",
+      ...(options?.queue === true ? { whenBusy: "queue" as const } : {}),
+      ...(options?.environment !== undefined ? { environment: options.environment } : {}),
+      createdAt,
+    });
+
+    yield* Effect.gen(function* () {
+      const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("command-create-project"),
+        projectId,
+        title: "Deferred turn start environment",
+        workspaceRoot: "/tmp/startup-deferred-environment-project",
+        defaultModelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("command-create-thread"),
+        threadId: lostEnvironmentThreadId,
+        projectId,
+        title: "Deferred turn start environment",
+        modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+      // A turn start is in flight, and two wakes wait behind it: one with an
+      // environment, then one without.
+      yield* engine.dispatch(turnStart("person-busy"));
+      yield* engine.dispatch(turnStart("wake-with-environment", { queue: true, environment }));
+      yield* engine.dispatch(turnStart("wake-without-environment", { queue: true }));
+    }).pipe(Effect.provide(makePersistedRuntimeLayer(config.dbPath)));
+
+    const startupLayer = ServerRuntimeStartup.layer.pipe(
+      Layer.provideMerge(makePersistedRuntimeLayer(config.dbPath)),
+      Layer.provideMerge(startupDependencies),
+    );
+    const result = yield* Effect.gen(function* () {
+      const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+      const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* startup.markHttpListening;
+      yield* startup.awaitCommandReady;
+      const events = Array.from(yield* Stream.runCollect(engine.readEvents(0)));
+      const typesFor = (commandId: string) =>
+        events.filter((event) => event.commandId === commandId).map((event) => event.type);
+      const dropped = events.find(
+        (event) =>
+          event.type === "thread.deferred-turn-start-dropped" &&
+          event.commandId === "wake-with-environment",
+      );
+      const deferred = events.find(
+        (event) =>
+          event.type === "thread.turn-start-deferred" &&
+          event.commandId === "wake-with-environment",
+      );
+      const deferredRows = yield* sql<{ readonly turnStartJson: string }>`
+        SELECT turn_start_json AS "turnStartJson"
+        FROM projection_thread_deferred_turn_starts
+      `;
+      return {
+        withEnvironment: typesFor("wake-with-environment"),
+        droppedReason:
+          dropped?.type === "thread.deferred-turn-start-dropped" ? dropped.payload.reason : null,
+        recordedEnvironment:
+          deferred?.type === "thread.turn-start-deferred" ? deferred.payload.hasEnvironment : null,
+        withoutEnvironment: typesFor("wake-without-environment"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - Scans every persisted event for a value none may carry.
+        eventsCarryEnvironment: JSON.stringify(events).includes(toolDir),
+        remainingDeferredRows: deferredRows.length,
+      };
+    }).pipe(Effect.provide(startupLayer));
+
+    assert.deepStrictEqual(result, {
+      // The environment lived only in the previous process, so the wake that
+      // carried one is dropped rather than started without it.
+      withEnvironment: ["thread.turn-start-deferred", "thread.deferred-turn-start-dropped"],
+      droppedReason: "environment-lost",
+      // The held start records that it had an environment, never its value.
+      recordedEnvironment: true,
+      // The wake behind it does not wait on the dropped one.
+      withoutEnvironment: [
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ],
+      eventsCarryEnvironment: false,
+      remainingDeferredRows: 0,
+    });
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3-startup-deferred-turn-start-environment-",
+      }).pipe(Layer.provideMerge(NodeServices.layer)),
     ),
   ),
 );

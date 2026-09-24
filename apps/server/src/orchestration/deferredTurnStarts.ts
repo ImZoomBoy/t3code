@@ -19,6 +19,12 @@
  * `pendingTurnStart` is not persisted: after a restart the provider reactor
  * sends `thread.deferred-turn-start.release` for threads that are free.
  *
+ * A start may carry an environment. The engine keeps it in memory beside the
+ * held start, never on an event, and hands it to the provider reactor when the
+ * start runs, exactly as for a direct start. The held start records only that
+ * it had one, so a start whose environment died with a restart is dropped
+ * with `environment-lost` when it would run, rather than run without it.
+ *
  * @module deferredTurnStarts
  */
 import type {
@@ -36,11 +42,7 @@ import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
-import {
-  OrchestrationCommandInvariantError,
-  type OrchestrationCommandRejection,
-  type OrchestrationProjectorDecodeError,
-} from "./Errors.ts";
+import type { OrchestrationCommandRejection, OrchestrationProjectorDecodeError } from "./Errors.ts";
 
 type PlannedEvent = Omit<OrchestrationEvent, "sequence">;
 // Omit over the union loses the `type` narrowing, so events are read through this.
@@ -69,6 +71,12 @@ type Decide = (
   OrchestrationCommandRejection | PlatformError.PlatformError,
   Crypto.Crypto
 >;
+
+/**
+ * Whether the server still holds the environment of the deferred start sent
+ * under this command id. It is false for every start after a restart.
+ */
+export type TurnEnvironmentHeld = (commandId: CommandId) => boolean;
 
 type Project = (
   readModel: OrchestrationReadModel,
@@ -192,14 +200,6 @@ export const deferTurnStartIfBusy = Effect.fn("deferTurnStartIfBusy")(function* 
   readonly eventBase: EventBase;
 }) {
   const { command, thread, now } = input;
-  // The environment is kept out of every event, so a start that waits could
-  // not carry it across a restart. Refuse it rather than start without it.
-  if (command.environment !== undefined) {
-    return yield* new OrchestrationCommandInvariantError({
-      commandType: command.type,
-      detail: "A turn start that waits for an idle thread cannot carry an environment.",
-    });
-  }
   if (!turnStartMustWait(thread)) return null;
   const event: PlannedEvent = {
     ...(yield* input.eventBase({
@@ -219,6 +219,7 @@ export const deferTurnStartIfBusy = Effect.fn("deferTurnStartIfBusy")(function* 
         ? { sourceProposedPlan: command.sourceProposedPlan }
         : {}),
       ...(command.issuer !== undefined ? { issuer: command.issuer } : {}),
+      ...(command.environment !== undefined ? { hasEnvironment: true as const } : {}),
       deferredAt: now,
     },
   };
@@ -257,8 +258,9 @@ const dropEvents = Effect.fn("dropDeferredTurnStarts")(function* (input: {
 
 /**
  * Starts the oldest deferred start on a free thread, as the `thread.turn.start`
- * it was sent as. One that the decider now refuses is dropped, and the next is
- * tried, so a refused start never leaves the rest waiting on a free thread.
+ * it was sent as. One that the decider now refuses, or whose environment the
+ * server no longer holds, is dropped, and the next is tried, so a dropped start
+ * never leaves the rest waiting on a free thread.
  */
 export const releaseDeferredTurnStart = Effect.fn("releaseDeferredTurnStart")(function* (input: {
   readonly readModel: OrchestrationReadModel;
@@ -266,10 +268,23 @@ export const releaseDeferredTurnStart = Effect.fn("releaseDeferredTurnStart")(fu
   readonly now: string;
   readonly decide: Decide;
   readonly eventBase: EventBase;
+  readonly turnEnvironmentHeld: TurnEnvironmentHeld;
 }) {
   const { thread, now } = input;
   const dropped: PlannedEvent[] = [];
   for (const deferred of thread.deferredTurnStarts ?? []) {
+    if (deferred.hasEnvironment === true && !input.turnEnvironmentHeld(deferred.commandId)) {
+      dropped.push(
+        ...(yield* dropEvents({
+          threadId: thread.id,
+          deferred: [deferred],
+          reason: "environment-lost",
+          now,
+          eventBase: input.eventBase,
+        })),
+      );
+      continue;
+    }
     const command: TurnStartCommand = {
       type: "thread.turn.start",
       commandId: deferred.commandId,
@@ -358,6 +373,7 @@ export const followDeferredTurnStarts = Effect.fn("followDeferredTurnStarts")(fu
   readonly decide: Decide;
   readonly project: Project;
   readonly eventBase: EventBase;
+  readonly turnEnvironmentHeld: TurnEnvironmentHeld;
 }) {
   const { command, planned, now } = input;
   // A turn start decides for itself whether to wait; the release command
@@ -397,6 +413,7 @@ export const followDeferredTurnStarts = Effect.fn("followDeferredTurnStarts")(fu
         now,
         decide: input.decide,
         eventBase: input.eventBase,
+        turnEnvironmentHeld: input.turnEnvironmentHeld,
       });
     }
   }

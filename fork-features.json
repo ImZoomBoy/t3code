@@ -180,6 +180,23 @@
       ],
       "test": "apps/server/integration/turnStartWhenBusy.integration.test.ts",
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-turn-start-when-busy-environment",
+      "description": "A turn start with whenBusy: \"queue\" can carry an environment. The engine keeps it in memory beside the held start, never on an event or in the deferred-turn-start table, and hands it to the provider reactor when the held start runs, so the session spawned or restarted for it gets it, as for a direct start. The held start records only hasEnvironment. After a restart the environment is gone, so such a start is dropped with the environment-lost reason instead of running without it. The server advertises turnStartWhenBusyEnvironment in its environment capabilities.",
+      "keep": "TurnEnvironment.ts and deferredTurnStarts.ts are ours whole, including makeHeldTurnEnvironments and the environment-lost drop in releaseDeferredTurnStart. The hasEnvironment field and the environment-lost drop reason survive in orchestration.ts; the turnStartWhenBusyEnvironment capability survives in environment.ts and ServerEnvironment.ts; the turnEnvironmentHeld parameter of decideCommand, decideCommandSequence and decideOrchestrationCommand and every place it is passed on survive in decider.ts; and the heldTurnEnvironments instance, its has passed to decideOrchestrationCommand and its remember call after the commit survive in OrchestrationEngine.ts. Everything else in those files takes upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/environment.ts",
+        "apps/server/src/environment/ServerEnvironment.ts",
+        "apps/server/src/orchestration/TurnEnvironment.ts",
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
+        "apps/server/src/orchestration/decider.ts",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts",
+      "testName": "waiting turn start that carries an environment|environment died with the process",
+      "patchesUpstream": true
     }
   ]
 }

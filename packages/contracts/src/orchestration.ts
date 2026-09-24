@@ -821,6 +821,10 @@ export const OrchestrationDeferredTurnStart = Schema.Struct({
   // Kept so the turn is checked against the thread's read-only rule the same
   // way when it starts. See `ThreadTurnStartCommand.issuer`.
   issuer: Schema.optional(Schema.Literal("fleet")),
+  // The turn start carried an environment. The environment itself stays in
+  // server memory and never reaches an event, so after a restart this is how
+  // the server knows it is gone.
+  hasEnvironment: Schema.optional(Schema.Literal(true)),
   deferredAt: IsoDateTime,
 });
 export type OrchestrationDeferredTurnStart = typeof OrchestrationDeferredTurnStart.Type;
@@ -2138,6 +2142,10 @@ export const DeferredTurnStartDropReason = Schema.Literals([
   "turn-start-refused",
   "thread-archived",
   "thread-deleted",
+  // The deferred turn start carried an environment, and the server restarted
+  // while it waited. The environment lived only in memory, so the start is
+  // dropped rather than run without it.
+  "environment-lost",
 ]);
 export type DeferredTurnStartDropReason = typeof DeferredTurnStartDropReason.Type;
 

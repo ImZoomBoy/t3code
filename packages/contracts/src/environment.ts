@@ -138,6 +138,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       Older servers drop the unknown field and steer the message into the
       running turn, so a caller must not send it when this is absent. */
   turnStartWhenBusy: Schema.optionalKey(Schema.Boolean),
+  /** Server accepts `environment` together with `whenBusy: "queue"` on
+      thread.turn.start and applies it when the held turn runs. A server that
+      advertises only turnStartWhenBusy refuses that pair. */
+  turnStartWhenBusyEnvironment: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.pin / thread.unpin commands. Same
       version-skew contract as threadSettlement. */
   threadPinning: Schema.optionalKey(Schema.Boolean),
