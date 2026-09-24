@@ -2586,39 +2586,24 @@ describe("partitionFirstMateThreads", () => {
       readonly fleetRole?: "first-mate" | "second-mate" | "worker";
       readonly fleetRepo?: string | null;
       readonly archivedAt?: string | null;
-      readonly pinnedAt?: string | null;
     } = {},
-  ) => ({ id, archivedAt: null, pinnedAt: null, ...fleet });
+  ) => ({ id, archivedAt: null, createdAt: "2026-09-24T00:00:00Z", pinnedAt: null, ...fleet });
 
-  it("puts a pinned First Mate in its own slot, outside every section", () => {
-    const firstMate = thread("fm", {
-      fleetRole: "first-mate",
-      fleetRepo: null,
-      pinnedAt: "2026-09-24T00:00:00Z",
-    });
+  it("puts the live First Mate in its own slot, outside every section", () => {
+    const firstMate = thread("fm", { fleetRole: "first-mate", fleetRepo: null });
     const secondMate = thread("2m", { fleetRole: "second-mate", fleetRepo: "t3code" });
     const worker = thread("w", { fleetRole: "worker", fleetRepo: "t3code" });
     const plain = thread("plain");
-    const { slot, rest, live } = partitionFirstMateThreads([secondMate, firstMate, worker, plain]);
+    const { slot, rest } = partitionFirstMateThreads([secondMate, firstMate, worker, plain]);
     expect(slot).toEqual([firstMate]);
-    expect(live).toEqual([firstMate]);
     // Second mates and workers pass on for the fleet tree to place.
     expect(rest).toEqual([secondMate, worker, plain]);
   });
 
-  it("lists an unpinned First Mate with the other threads, and still counts it live", () => {
-    const firstMate = thread("fm", { fleetRole: "first-mate" });
-    const { slot, rest, live } = partitionFirstMateThreads([thread("plain"), firstMate]);
-    expect(slot).toEqual([]);
-    expect(rest).toEqual([thread("plain"), firstMate]);
-    expect(live).toEqual([firstMate]);
-  });
-
   it("leaves the slot empty once First Mate is archived", () => {
     const archived = thread("fm", { fleetRole: "first-mate", archivedAt: "2026-09-23T00:00:00Z" });
-    const { slot, rest, live } = partitionFirstMateThreads([archived, thread("plain")]);
+    const { slot, rest } = partitionFirstMateThreads([archived, thread("plain")]);
     expect(slot).toEqual([]);
-    expect(live).toEqual([]);
     expect(rest.map((entry) => entry.id)).toEqual(["plain"]);
   });
 });

@@ -86,25 +86,22 @@ their default order until the server is updated.
 
 ## First Mate threads
 
-On web and desktop, the sidebar arranges First Mate's fleet as a small tree above your other
-threads. Each fleet row says what it is on its model line, **First Mate**, **Second mate** or
-**Worker**, in its own colour, followed by the model and its reasoning level, with a ship,
-sailboat or pickaxe beside the project icon.
+On web and desktop, the sidebar keeps First Mate's fleet together above your other threads, and
+each fleet thread is labelled **First Mate**, **Second mate** or **Worker**.
 
-- **First Mate** is pink. Pin it to keep it at the top of the sidebar, above a divider. Unpinned,
-  it lists among your other threads. It never settles automatically, even when a pull request
-  linked to it merges.
-- **Second mates** follow, one per repository, in repository-name order. Each keeps its own colour
-  and its place, whatever it is doing, and never settles away.
-- **Workers** sit indented under the second mate for their repository, in that second mate's
-  colour. Use the arrow beside a second mate to hide or show its workers. A worker you settle or
-  snooze moves to the usual shelf.
+- **First Mate** always stays at the top. It never settles automatically, even when a pull
+  request linked to it merges. If you have First Mate threads in more than one environment, pin
+  the one you want on top. The others list under it.
+- **Second mates** follow, one per repository, in repository-name order. Each keeps its place
+  whatever it is doing.
+- **Workers** sit under the second mate for their repository, including workers you settle or
+  snooze. You can hide a second mate's workers and show them again.
 
-When no First Mate thread is live, for example after you archive it, choose **New First Mate**
-at the top of the sidebar to start one. It runs in the folder set in **Settings → General →
-First Mate working directory**. The first time, the desktop app asks you to choose that folder
-and saves it. A new First Mate runs on Claude Opus 5.5 with the 1M context at medium effort.
-Only one First Mate thread can be live at a time.
+When no First Mate thread is live, for example after you archive it, choose **Start First Mate**
+at the top of the sidebar. It runs in the folder set in **Settings → General → First Mate working
+directory**. The first time, the desktop app asks you to choose that folder and saves it. A new
+First Mate runs on Claude Opus 5.5 with the 1M context at medium effort. Each environment can have
+one live First Mate thread at a time.
 
 ## Settle finished work
 

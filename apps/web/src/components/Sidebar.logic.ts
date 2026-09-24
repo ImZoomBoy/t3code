@@ -14,6 +14,7 @@ import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
 } from "@t3tools/client-runtime/state/thread-settled";
+import { planFirstMateSlot } from "./sidebar/fleetSidebar.logic";
 import {
   isFirstMateThread,
   threadDisplayTitle,
@@ -904,31 +905,26 @@ export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@t3t
 const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
 
 /**
- * Split the First Mate thread out of the sidebar's thread list. A pinned First
- * Mate sits in its own slot above every section and ignores the project scope:
- * `slot` holds it (the server keeps one live First Mate per environment). An
- * unpinned one lists in `rest` with every other thread, for the pinned, active,
- * snoozed, and settled sections to share. `live` holds every live First Mate,
- * pinned or not, so the sidebar knows whether one exists.
+ * Split the First Mate threads out of the sidebar's thread list. First Mate
+ * always sits in its own slot above every section and ignores the project
+ * scope: `slot` holds the live First Mate threads, the main one first (see
+ * planFirstMateSlot), and `rest` holds every other thread, for the pinned,
+ * active, snoozed, and settled sections to share. An archived First Mate
+ * leaves both.
  */
 export function partitionFirstMateThreads<
   T extends FleetThreadFields & {
+    readonly id: string;
     readonly archivedAt: string | null;
+    readonly createdAt: string;
     readonly pinnedAt?: string | null | undefined;
   },
->(threads: readonly T[]): { readonly slot: T[]; readonly rest: T[]; readonly live: T[] } {
-  const slot: T[] = [];
-  const rest: T[] = [];
-  const live: T[] = [];
-  for (const thread of threads) {
-    if (!isFirstMateThread(thread)) {
-      rest.push(thread);
-    } else if (thread.archivedAt === null) {
-      live.push(thread);
-      (thread.pinnedAt != null ? slot : rest).push(thread);
-    }
-  }
-  return { slot, rest, live };
+>(threads: readonly T[]): { readonly slot: T[]; readonly rest: T[] } {
+  const plan = planFirstMateSlot(threads);
+  return {
+    slot: plan.kind === "first-mates" ? [plan.main, ...plan.others] : [],
+    rest: threads.filter((thread) => !isFirstMateThread(thread)),
+  };
 }
 
 /**

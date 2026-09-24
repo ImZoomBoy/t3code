@@ -159,13 +159,15 @@ import type { SidebarThreadSummary } from "../types";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { FirstMateIcon, FleetRoleIcon } from "./FirstMateIcon";
+import { FirstMateIcon } from "./FirstMateIcon";
+import { FleetRoleIcon } from "./FleetRoleIcon";
 import {
-  assignSecondMateTones,
+  buildFleetRows,
   buildFleetTree,
-  FIRST_MATE_TONE,
-  fleetRoleWord,
-  SECOND_MATE_TONES,
+  FLEET_ROLE_WORDS,
+  FLEET_TONE_CLASSES,
+  type FleetParked,
+  type FleetTone,
 } from "./sidebar/fleetSidebar.logic";
 import { resolveReadOnlyThreadModel } from "./chat/readOnlyThreadModel.logic";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
@@ -982,23 +984,35 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   ),
 };
 
-const FIRST_MATE_PLACEMENT: FleetRowPlacement = { depth: 0, tone: FIRST_MATE_TONE, quiet: false };
-
-/** Where a fleet row sits in the fleet tree, and the colour it wears. */
+/**
+ * Where a fleet row sits, the colour it wears, and which row controls it keeps.
+ * A second mate's place is fixed: it keeps only the way back out of a settle,
+ * snooze or pin it already has. First Mate is never settled or snoozed, and
+ * its pin, which marks the main First Mate, is offered on the row.
+ */
 interface FleetRowPlacement {
   readonly depth: 0 | 1;
-  /** Text colour classes: First Mate's pink or its second mate's colour. */
-  readonly tone: string;
+  readonly tone: FleetTone;
   /** A worker: its second mate's colour, faded, at regular weight. */
   readonly quiet: boolean;
+  readonly lifecycle: "none" | "undo-only" | "default";
+  readonly pin: "none" | "unpin-only" | "default" | "toggle";
   readonly fold?: { readonly expanded: boolean; readonly onToggle: () => void } | undefined;
 }
+
+const FIRST_MATE_PLACEMENT: FleetRowPlacement = {
+  depth: 0,
+  tone: "first-mate",
+  quiet: false,
+  lifecycle: "none",
+  pin: "toggle",
+};
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
   // A row in the fleet: First Mate, a second mate, or a worker under its
-  // second mate. Absent for ordinary threads and for a worker parked on a shelf.
+  // second mate. Absent for ordinary threads.
   fleet?: FleetRowPlacement | undefined;
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
@@ -1050,6 +1064,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onSnooze: (threadRef: ScopedThreadRef, preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
+  // Present where the row offers its own pin on hover (First Mate rows).
+  onPin?: ((threadRef: ScopedThreadRef) => void) | undefined;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   /**
    * External files dropped onto this row. The row highlights while the drag
@@ -1074,6 +1090,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onUnsettle,
     onUnsnooze,
     onUnpin,
+    onPin,
     openPullRequestsInRightPanel,
     renamingTitle,
     thread,
@@ -1251,7 +1268,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }).thinkingLabel
     : null;
   // A worker wears its second mate's colour, quieter.
-  const fleetToneClassName = fleet ? cn(fleet.tone, fleet.quiet && "opacity-70") : undefined;
+  const fleetToneClassName = fleet
+    ? cn(FLEET_TONE_CLASSES[fleet.tone], fleet.quiet && "opacity-70")
+    : undefined;
   const displayTitle = threadDisplayTitle(thread);
 
   // The local environment is "this machine" and needs no marker; every other
@@ -1397,6 +1416,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onUnpin(threadRef);
     },
     [onUnpin, threadRef],
+  );
+  const handlePinClick = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onPin?.(threadRef);
+    },
+    [onPin, threadRef],
   );
   const handleSnoozePreset = useCallback(
     (preset: Pick<SnoozePreset, "snoozedUntil">) => {
@@ -1606,6 +1633,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : null;
   const showPin =
     props.isPinned && (!sortable?.isDragging || (props.dragOverPinned && props.dropVerb === null));
+  const showPinButton =
+    onPin !== undefined && props.pinningSupported && !props.isPinned && !sortable?.isDragging;
   const pinIndicator = showPin ? (
     props.pinningSupported && !sortable?.isDragging ? (
       <Tooltip>
@@ -1642,6 +1671,30 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       />
     ) : null;
 
+  // The fold arrow sits in the gutter left of the project icon, so a second
+  // mate lines up with the rows around it.
+  const foldButton = fleet?.fold ? (
+    <button
+      type="button"
+      aria-expanded={fleet.fold.expanded}
+      aria-label={fleet.fold.expanded ? "Hide workers" : "Show workers"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        fleet.fold?.onToggle();
+      }}
+      className={cn(
+        "absolute left-0 z-20 inline-flex h-5 w-2.5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        variant === "slim" ? "top-2" : "top-[calc(var(--sidebar-content-inset)+0.125rem)]",
+      )}
+    >
+      <ChevronRightIcon
+        aria-hidden
+        className={cn("size-2.5 shrink-0 transition-transform", fleet.fold.expanded && "rotate-90")}
+      />
+    </button>
+  ) : null;
+
   if (variant === "slim") {
     return (
       <li
@@ -1652,8 +1705,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           // Matches the h-9 row so unrendered rows never shift the list when they paint.
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]",
           sortable?.isDragging && "relative z-20",
+          fleet && "relative",
+          fleet?.depth === 1 && "pl-4",
         )}
       >
+        {foldButton}
         <Tooltip disabled={sortable?.isDragging}>
           <TooltipTrigger
             render={
@@ -1682,6 +1738,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             >
               {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
             </span>
+            {/* A parked fleet row keeps its role mark, so it still reads as
+              part of the tree it sits in. */}
+            {fleetRole ? <FleetRoleIcon role={fleetRole} className={fleetToneClassName} /> : null}
             {draftIndicator}
             {title}
             {roleBadge}
@@ -1811,29 +1870,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         fleet?.depth === 1 && "pl-4",
       )}
     >
-      {/* The fold arrow sits in the gutter left of the project icon, so a
-          second mate lines up with the rows around it. */}
-      {fleet?.fold ? (
-        <button
-          type="button"
-          aria-expanded={fleet.fold.expanded}
-          aria-label={fleet.fold.expanded ? "Hide workers" : "Show workers"}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            fleet.fold?.onToggle();
-          }}
-          className="absolute top-[calc(var(--sidebar-content-inset)+0.125rem)] left-0 z-20 inline-flex h-5 w-2.5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChevronRightIcon
-            aria-hidden
-            className={cn(
-              "size-2.5 shrink-0 transition-transform",
-              fleet.fold.expanded && "rotate-90",
-            )}
-          />
-        </button>
-      ) : null}
+      {foldButton}
       <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
         <TooltipTrigger
           render={
@@ -1968,7 +2005,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       threadTimeLabel(thread)
                     )}
                   </span>
-                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
+                  {props.settlementSupported ||
+                  showSnoozeButton ||
+                  hasUnsentDraft ||
+                  showPinButton ? (
                     <span
                       className={cn(
                         // focus-visible, not focus-within: a mouse click leaves
@@ -1995,6 +2035,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             <XIcon className="size-3.5" />
                           </TooltipTrigger>
                           <TooltipPopup side="top">Discard draft</TooltipPopup>
+                        </Tooltip>
+                      ) : null}
+                      {showPinButton ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <button
+                                type="button"
+                                aria-label="Pin thread"
+                                onClick={handlePinClick}
+                                className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                              />
+                            }
+                          >
+                            <PinIcon className="size-3.5" />
+                            Pin
+                          </TooltipTrigger>
+                          <TooltipPopup>Pin as the main First Mate</TooltipPopup>
                         </Tooltip>
                       ) : null}
                       {showSnoozeButton ? (
@@ -2060,7 +2118,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   {fleetRole ? (
                     <>
                       <span className={cn(fleetToneClassName, !fleet?.quiet && "font-medium")}>
-                        {fleetRoleWord(thread)}
+                        {FLEET_ROLE_WORDS[fleetRole]}
                       </span>
                       {" \u00b7 "}
                     </>
@@ -2670,8 +2728,8 @@ export default function Sidebar() {
   } | null>(null);
   const {
     firstMateThreads,
-    hasLiveFirstMate,
     fleetBranches,
+    fleetParked,
     pinnedThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
@@ -2686,25 +2744,34 @@ export default function Sidebar() {
     // memo exactly at the next wake boundary.
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    // A pinned First Mate takes its own slot above every section. First Mate
-    // ignores the project scope wherever it sits.
-    const { slot: firstMate, rest, live } = partitionFirstMateThreads(threads);
+    // First Mate takes its own slot above every section and ignores the
+    // project scope.
+    const { slot: firstMate, rest } = partitionFirstMateThreads(threads);
     const inScope = rest.filter(
       (thread) =>
         thread.archivedAt === null &&
-        (isFirstMateThread(thread) ||
-          scopedProjectKeys === null ||
+        (scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
-    // Second mates and their workers leave the sections for the fleet tree. A
-    // settled or snoozed worker stays on the shelves like any other thread.
-    const fleetTree = buildFleetTree(inScope, (thread) => {
-      const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-      return (
-        (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow })) ||
-        (capabilities?.threadSettlement === true && thread.settledOverride === "settled")
-      );
-    });
+    // Second mates and their workers leave the sections for the fleet tree,
+    // settled and snoozed ones included: they park in place.
+    const fleetTree = buildFleetTree(inScope);
+    const parked = new Map<EnvironmentThreadShell, FleetParked>();
+    for (const branch of fleetTree.branches) {
+      for (const thread of branch.secondMate
+        ? [branch.secondMate, ...branch.workers]
+        : branch.workers) {
+        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+        if (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow })) {
+          parked.set(thread, "snoozed");
+        } else if (
+          capabilities?.threadSettlement === true &&
+          thread.settledOverride === "settled"
+        ) {
+          parked.set(thread, "settled");
+        }
+      }
+    }
     const visible = fleetTree.rest;
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2764,8 +2831,8 @@ export default function Sidebar() {
     const sortedActive = sortThreadsForSidebar(active);
     return {
       firstMateThreads: firstMate,
-      hasLiveFirstMate: live.length > 0,
       fleetBranches: fleetTree.branches,
+      fleetParked: parked,
       pinnedThreads:
         optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
           ? sortedPinned
@@ -2805,45 +2872,29 @@ export default function Sidebar() {
       return next;
     });
   }, []);
-  // The fleet tree as rows: each second mate in its colour, then its workers
-  // indented under it unless folded.
-  const fleetRows = useMemo(() => {
-    const tones = assignSecondMateTones(
-      fleetBranches.flatMap((branch) => (branch.secondMate ? [branch.repo] : [])),
-    );
-    const rows: {
-      readonly thread: EnvironmentThreadShell;
-      readonly placement: FleetRowPlacement;
-    }[] = [];
-    for (const branch of fleetBranches) {
-      const toneIndex = tones.get(branch.repo);
-      const tone =
-        toneIndex === undefined ? "text-muted-foreground" : SECOND_MATE_TONES[toneIndex]!;
-      const folded = foldedFleetRepos.has(branch.repo);
-      if (branch.secondMate) {
-        rows.push({
-          thread: branch.secondMate,
-          placement: {
-            depth: 0,
-            tone,
-            quiet: false,
-            fold:
-              branch.workers.length > 0
-                ? { expanded: !folded, onToggle: () => toggleFleetRepo(branch.repo) }
-                : undefined,
-          },
-        });
-      }
-      if (folded) continue;
-      for (const worker of branch.workers) {
-        rows.push({
-          thread: worker,
-          placement: { depth: branch.secondMate ? 1 : 0, tone, quiet: true },
-        });
-      }
-    }
-    return rows;
-  }, [fleetBranches, foldedFleetRepos, toggleFleetRepo]);
+  const fleetRows = useMemo(
+    () =>
+      buildFleetRows(fleetBranches, {
+        isFolded: (repo) => foldedFleetRepos.has(repo),
+        parkedState: (thread) => fleetParked.get(thread) ?? null,
+      }).map((row) => ({
+        thread: row.thread,
+        // A parked fleet row draws as today's settled or snoozed row, so it
+        // keeps its un-settle or wake control where it stands.
+        section: row.parked ?? ("active" as const),
+        placement: {
+          depth: row.depth,
+          tone: row.tone,
+          quiet: row.quiet,
+          lifecycle: row.thread.fleetRole === "second-mate" ? "undo-only" : "default",
+          pin: row.pin,
+          fold: row.fold
+            ? { expanded: row.fold.expanded, onToggle: () => toggleFleetRepo(row.fold!.repo) }
+            : undefined,
+        } satisfies FleetRowPlacement,
+      })),
+    [fleetBranches, fleetParked, foldedFleetRepos, toggleFleetRepo],
+  );
   const fleetThreads = useMemo(() => fleetRows.map((row) => row.thread), [fleetRows]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
@@ -4279,11 +4330,15 @@ export default function Sidebar() {
           null;
         // Un-settle pins the thread active until real activity clears the pin.
         // Environments without
-        // the settlement capability get no lifecycle items at all.
+        // the settlement capability get no lifecycle items at all. First Mate
+        // holds the top slot, which has no settled or snoozed look to undo.
+        const isFirstMate = isFirstMateThread(thread);
         const supportsSettlement =
+          !isFirstMate &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true;
+            true;
         const supportsSnooze =
+          !isFirstMate &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
         const supportsPinning =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning === true;
@@ -4906,15 +4961,12 @@ export default function Sidebar() {
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
                         sortable?: SortableThreadRowBag,
-                        // The First Mate slot: always a pinned card, and none of
-                        // the lifecycle moves that would take it out of the slot.
-                        firstMateSlot = false,
                         fleet?: FleetRowPlacement,
                       ) => {
-                        // A second mate keeps its place in the fleet tree: no
-                        // settling, snoozing or pinning it out of there.
-                        const fixedInFleet =
-                          fleet !== undefined && thread.fleetRole === "second-mate";
+                        const capabilities = serverConfigs.get(thread.environmentId)?.environment
+                          .capabilities;
+                        const lifecycle = fleet?.lifecycle ?? "default";
+                        const pin = fleet?.pin ?? "default";
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
@@ -4941,23 +4993,20 @@ export default function Sidebar() {
                                   : "settle"
                             }
                             settlementSupported={
-                              !firstMateSlot &&
-                              !fixedInFleet &&
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadSettlement === true
+                              capabilities?.threadSettlement === true &&
+                              (lifecycle === "default" ||
+                                (lifecycle === "undo-only" && section === "settled"))
                             }
                             snoozeSupported={
-                              !firstMateSlot &&
-                              !fixedInFleet &&
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadSnooze === true
+                              capabilities?.threadSnooze === true &&
+                              (lifecycle === "default" ||
+                                (lifecycle === "undo-only" && section === "snoozed"))
                             }
                             pinningSupported={
-                              !fixedInFleet &&
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadPinning === true
+                              capabilities?.threadPinning === true && pin !== "none"
                             }
                             isPinned={thread.pinnedAt != null}
+                            onPin={pin === "toggle" ? attemptPin : undefined}
                             sortable={sortable}
                             dropVerb={
                               dragState?.activeKey === threadKey
@@ -5027,7 +5076,6 @@ export default function Sidebar() {
                       const renderThreadRow = (
                         thread: EnvironmentThreadShell,
                         section: SidebarSection,
-                        fleet?: FleetRowPlacement,
                       ) => {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
@@ -5042,54 +5090,49 @@ export default function Sidebar() {
                               optimisticDrop !== null
                             }
                           >
-                            {(bag) => renderThreadRowInner(thread, section, bag, false, fleet)}
+                            {(bag) => renderThreadRowInner(thread, section, bag)}
                           </SortableThreadRow>
                         );
                       };
                       const from = dragState?.activeSection ?? null;
                       const items: ReactNode[] = [
+                        // First Mate always holds the top: the main one, any
+                        // others under it, or a row to start one.
                         ...(firstMateThreads.length > 0
-                          ? [
-                              ...firstMateThreads.map((thread) =>
-                                renderThreadRowInner(
-                                  thread,
-                                  "pinned",
-                                  undefined,
-                                  true,
-                                  FIRST_MATE_PLACEMENT,
-                                ),
+                          ? firstMateThreads.map((thread) =>
+                              renderThreadRowInner(
+                                thread,
+                                "pinned",
+                                undefined,
+                                FIRST_MATE_PLACEMENT,
                               ),
-                              // Sets the pinned First Mate apart from every row below.
-                              <li
-                                key="first-mate-divider"
-                                aria-hidden
-                                className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border"
-                              />,
-                            ]
-                          : hasLiveFirstMate
-                            ? []
-                            : [
-                                <li key="first-mate-start" className="flex list-none">
-                                  <Button
-                                    variant="ghost-muted"
-                                    data-testid="sidebar-start-first-mate"
-                                    disabled={startingFirstMate}
-                                    onClick={handleStartFirstMate}
-                                    className="flex-1 justify-start"
-                                  >
-                                    <FirstMateIcon />
-                                    {startingFirstMate ? "Starting First Mate…" : "New First Mate"}
-                                  </Button>
-                                </li>,
-                              ]),
+                            )
+                          : [
+                              <li key="first-mate-start" className="list-none py-0.5">
+                                <button
+                                  type="button"
+                                  data-testid="sidebar-start-first-mate"
+                                  disabled={startingFirstMate}
+                                  onClick={handleStartFirstMate}
+                                  className="flex h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-[var(--sidebar-row-content-inset)] text-left text-sm font-medium outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
+                                >
+                                  <FirstMateIcon />
+                                  <span className={FLEET_TONE_CLASSES["first-mate"]}>
+                                    {startingFirstMate
+                                      ? "Starting First Mate…"
+                                      : "Start First Mate"}
+                                  </span>
+                                </button>
+                              </li>,
+                            ]),
+                        // Sets First Mate apart from every row below.
+                        <li
+                          key="first-mate-divider"
+                          aria-hidden
+                          className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border"
+                        />,
                         ...fleetRows.map((row) =>
-                          renderThreadRowInner(
-                            row.thread,
-                            "active",
-                            undefined,
-                            false,
-                            row.placement,
-                          ),
+                          renderThreadRowInner(row.thread, row.section, undefined, row.placement),
                         ),
                         <SidebarDraftBlock
                           key="draft-sessions"
@@ -5102,15 +5145,7 @@ export default function Sidebar() {
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          const thread = threadByKey.get(item.key)!;
-                          // An unpinned First Mate lists among the threads, still dressed as First Mate.
-                          items.push(
-                            renderThreadRow(
-                              thread,
-                              item.section,
-                              isFirstMateThread(thread) ? FIRST_MATE_PLACEMENT : undefined,
-                            ),
-                          );
+                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
                         switch (item.marker) {

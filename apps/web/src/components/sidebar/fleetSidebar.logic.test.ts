@@ -3,8 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { partitionFirstMateThreads } from "../Sidebar.logic";
 import {
   assignSecondMateTones,
+  buildFleetRows,
   buildFleetTree,
-  fleetRoleWord,
+  planFirstMateSlot,
   SECOND_MATE_TONES,
 } from "./fleetSidebar.logic";
 
@@ -19,7 +20,7 @@ const thread = (
     readonly updatedAt?: string;
     readonly archivedAt?: string | null;
     readonly pinnedAt?: string | null;
-    readonly settled?: boolean;
+    readonly parked?: "settled" | "snoozed" | null;
   } = {},
 ) => ({
   id,
@@ -29,11 +30,63 @@ const thread = (
   updatedAt: "2026-09-24T10:00:00Z",
   archivedAt: null,
   pinnedAt: null,
-  settled: false,
+  parked: null,
   ...fields,
 });
+type TestThread = ReturnType<typeof thread>;
 
 const ids = (threads: ReadonlyArray<{ readonly id: string }>) => threads.map((entry) => entry.id);
+
+const rowsFor = (threads: readonly TestThread[], folded: readonly string[] = []) =>
+  buildFleetRows(buildFleetTree(threads).branches, {
+    isFolded: (repo) => folded.includes(repo),
+    parkedState: (entry) => entry.parked,
+  });
+
+describe("First Mate at the top", () => {
+  it("keeps First Mate in the top slot whether or not it is pinned", () => {
+    const unpinned = thread("fm", { fleetRole: "first-mate" });
+    const { slot, rest } = partitionFirstMateThreads([thread("plain"), unpinned]);
+    expect(ids(slot)).toEqual(["fm"]);
+    expect(ids(rest)).toEqual(["plain"]);
+  });
+
+  it("offers Start First Mate when no First Mate thread is live", () => {
+    const archived = thread("fm", { fleetRole: "first-mate", archivedAt: "2026-09-24T11:00:00Z" });
+    expect(planFirstMateSlot([archived, thread("plain")])).toEqual({ kind: "start" });
+  });
+
+  it("puts the pinned First Mate on top and lists the others under it", () => {
+    const older = thread("fm-old", { fleetRole: "first-mate", createdAt: "2026-09-20T00:00:00Z" });
+    const pinned = thread("fm-pinned", {
+      fleetRole: "first-mate",
+      createdAt: "2026-09-21T00:00:00Z",
+      pinnedAt: "2026-09-22T00:00:00Z",
+    });
+    const newest = thread("fm-new", { fleetRole: "first-mate", createdAt: "2026-09-23T00:00:00Z" });
+    const plan = planFirstMateSlot([older, newest, pinned]);
+    expect(plan.kind === "first-mates" ? [plan.main.id, ...ids(plan.others)] : plan).toEqual([
+      "fm-pinned",
+      "fm-new",
+      "fm-old",
+    ]);
+  });
+
+  it("puts the most recent First Mate on top when none is pinned", () => {
+    const older = thread("fm-old", { fleetRole: "first-mate", createdAt: "2026-09-20T00:00:00Z" });
+    const newest = thread("fm-new", { fleetRole: "first-mate", createdAt: "2026-09-23T00:00:00Z" });
+    const plan = planFirstMateSlot([older, newest]);
+    expect(plan.kind === "first-mates" ? [plan.main.id, ...ids(plan.others)] : plan).toEqual([
+      "fm-new",
+      "fm-old",
+    ]);
+  });
+
+  it("lets a First Mate row be pinned and unpinned from the row", () => {
+    const plan = planFirstMateSlot([thread("fm", { fleetRole: "first-mate" })]);
+    expect(plan.kind === "first-mates" ? plan.pin : null).toBe("toggle");
+  });
+});
 
 describe("buildFleetTree", () => {
   it("puts each worker under the second mate that shares its fleetRepo", () => {
@@ -73,65 +126,75 @@ describe("buildFleetTree", () => {
         createdAt: "2026-09-24T09:30:00Z",
       }),
     ];
-    const order = (busy: string) =>
-      buildFleetTree(fleet(busy)).branches.flatMap((branch) => [
-        branch.secondMate?.id,
-        ...ids(branch.workers),
-      ]);
+    const order = (busy: string) => ids(rowsFor(fleet(busy)).map((row) => row.thread));
     const expected = ["sm-lavish", "sm-t3", "w-old", "w-new"];
-    expect(order("none")).toEqual(expected);
-    expect(order("sm-t3")).toEqual(expected);
-    expect(order("sm-lavish")).toEqual(expected);
-    expect(order("w-old")).toEqual(expected);
+    for (const busy of ["none", "sm-t3", "sm-lavish", "w-old"]) {
+      expect(order(busy)).toEqual(expected);
+    }
   });
 
   it("passes ordinary threads through unchanged and in their order", () => {
     const plain = [thread("b"), thread("a"), thread("c")];
-    const { branches, rest } = buildFleetTree([
+    const { rest } = buildFleetTree([
       plain[0]!,
       thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
+      thread("w", { fleetRole: "worker", fleetRepo: "t3code", parked: "settled" }),
       plain[1]!,
       plain[2]!,
     ]);
     expect(rest).toEqual(plain);
-    expect(branches).toHaveLength(1);
-  });
-
-  it("keeps a settled second mate in the tree and sends a settled worker to the shelves", () => {
-    const secondMate = thread("sm", {
-      fleetRole: "second-mate",
-      fleetRepo: "t3code",
-      settled: true,
-    });
-    const worker = thread("w", { fleetRole: "worker", fleetRepo: "t3code", settled: true });
-    const { branches, rest } = buildFleetTree([secondMate, worker], (entry) => entry.settled);
-    expect(branches.map((branch) => branch.secondMate?.id)).toEqual(["sm"]);
-    expect(branches[0]!.workers).toEqual([]);
-    expect(rest).toEqual([worker]);
-  });
-
-  it("lists workers without a second mate after every crewed repository", () => {
-    const { branches } = buildFleetTree([
-      thread("w-orphan", { fleetRole: "worker", fleetRepo: "aaa" }),
-      thread("sm", { fleetRole: "second-mate", fleetRepo: "zzz" }),
-    ]);
-    expect(branches.map((branch) => [branch.repo, branch.secondMate?.id ?? null])).toEqual([
-      ["zzz", "sm"],
-      ["aaa", null],
-    ]);
   });
 });
 
-describe("pinned First Mate", () => {
-  it("stays at the top, above the fleet tree and every other thread", () => {
-    const threads = [
-      thread("plain"),
+describe("buildFleetRows", () => {
+  it("keeps settled and snoozed workers under their second mate, marked as parked", () => {
+    const rows = rowsFor([
       thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
-      thread("fm", { fleetRole: "first-mate", pinnedAt: "2026-09-24T08:00:00Z" }),
+      thread("w-settled", { fleetRole: "worker", fleetRepo: "t3code", parked: "settled" }),
+      thread("w-snoozed", {
+        fleetRole: "worker",
+        fleetRepo: "t3code",
+        parked: "snoozed",
+        createdAt: "2026-09-24T11:00:00Z",
+      }),
+    ]);
+    expect(rows.map((row) => [row.thread.id, row.depth, row.parked])).toEqual([
+      ["sm", 0, null],
+      ["w-settled", 1, "settled"],
+      ["w-snoozed", 1, "snoozed"],
+    ]);
+  });
+
+  it("hides a folded second mate's workers and shows them again when unfolded", () => {
+    const fleet = [
+      thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
+      thread("w", { fleetRole: "worker", fleetRepo: "t3code" }),
     ];
-    const { slot, rest } = partitionFirstMateThreads(threads);
-    expect(ids(slot)).toEqual(["fm"]);
-    expect(ids(rest)).not.toContain("fm");
+    const folded = rowsFor(fleet, ["t3code"]);
+    expect(ids(folded.map((row) => row.thread))).toEqual(["sm"]);
+    expect(folded[0]!.fold).toEqual({ repo: "t3code", expanded: false });
+    expect(ids(rowsFor(fleet).map((row) => row.thread))).toEqual(["sm", "w"]);
+  });
+
+  it("keeps the way back for a second mate that was settled, snoozed or pinned before", () => {
+    const rows = rowsFor([
+      thread("sm-settled", { fleetRole: "second-mate", fleetRepo: "a", parked: "settled" }),
+      thread("sm-snoozed", { fleetRole: "second-mate", fleetRepo: "b", parked: "snoozed" }),
+      thread("sm-pinned", {
+        fleetRole: "second-mate",
+        fleetRepo: "c",
+        pinnedAt: "2026-09-24T00:00:00Z",
+      }),
+      thread("sm-plain", { fleetRole: "second-mate", fleetRepo: "d" }),
+    ]);
+    expect(rows.map((row) => [row.thread.id, row.parked, row.pin])).toEqual([
+      // Parked rows keep their un-settle or wake control where they stand.
+      ["sm-settled", "settled", "none"],
+      ["sm-snoozed", "snoozed", "none"],
+      // A pinned one keeps the unpin control; an unpinned one has no pin.
+      ["sm-pinned", null, "unpin-only"],
+      ["sm-plain", null, "none"],
+    ]);
   });
 });
 
@@ -143,18 +206,9 @@ describe("assignSecondMateTones", () => {
     for (const repo of repos) expect(again.get(repo)).toBe(first.get(repo));
   });
 
-  it("gives every second mate its own colour up to the palette size", () => {
-    const repos = Array.from({ length: SECOND_MATE_TONES.length }, (_, index) => `repo-${index}`);
-    const tones = assignSecondMateTones(repos);
-    expect(new Set(tones.values()).size).toBe(repos.length);
-  });
-});
-
-describe("fleetRoleWord", () => {
-  it("names each fleet role and nothing for an ordinary thread", () => {
-    expect(fleetRoleWord({ fleetRole: "first-mate" })).toBe("First Mate");
-    expect(fleetRoleWord({ fleetRole: "second-mate" })).toBe("Second mate");
-    expect(fleetRoleWord({ fleetRole: "worker" })).toBe("Worker");
-    expect(fleetRoleWord({ fleetRole: null })).toBeNull();
+  it("gives six second mates six different colours", () => {
+    expect(SECOND_MATE_TONES.length).toBeGreaterThanOrEqual(6);
+    const repos = ["firstmate", "t3code", "lavish-axi", "agos", "printworks", "site"];
+    expect(new Set(assignSecondMateTones(repos).values()).size).toBe(6);
   });
 });
