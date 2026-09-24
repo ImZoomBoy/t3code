@@ -799,6 +799,32 @@ export const ThreadPullRequestLink = Schema.Struct({
 });
 export type ThreadPullRequestLink = typeof ThreadPullRequestLink.Type;
 
+/**
+ * A turn start that asked to wait for an idle thread and found it busy. It
+ * holds everything the turn start needs, so the server can start the turn
+ * later exactly as if the command had arrived then.
+ */
+export const OrchestrationDeferredTurnStart = Schema.Struct({
+  // The command that asked for the turn. The turn's events carry it when the
+  // turn starts, so a caller can match the turn to its request.
+  commandId: CommandId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+    context: Schema.optional(OrchestrationMessageContext),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Kept so the turn is checked against the thread's read-only rule the same
+  // way when it starts. See `ThreadTurnStartCommand.issuer`.
+  issuer: Schema.optional(Schema.Literal("fleet")),
+  deferredAt: IsoDateTime,
+});
+export type OrchestrationDeferredTurnStart = typeof OrchestrationDeferredTurnStart.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -875,6 +901,16 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  // Turn starts waiting for this thread to go idle, oldest first. Only the
+  // server's command model carries it: client snapshots leave it out, so a
+  // deferred turn start is not shown until it starts. Absent means none.
+  deferredTurnStarts: Schema.optional(Schema.Array(OrchestrationDeferredTurnStart)),
+  // The turn start the server has asked a provider for and that no turn has
+  // taken up yet. Command model only, and not kept across a restart: a turn
+  // start the provider reactor had not handled is lost with the process.
+  pendingTurnStart: Schema.optional(
+    Schema.NullOr(Schema.Struct({ messageId: MessageId, requestedAt: IsoDateTime })),
+  ),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -1389,6 +1425,18 @@ const ThreadTurnStartBootstrap = Schema.Struct({
 
 export type ThreadTurnStartBootstrap = typeof ThreadTurnStartBootstrap.Type;
 
+/**
+ * What a turn start does when the thread already has a turn running.
+ *
+ * `steer` feeds the message into the running turn, which is what a person
+ * typing into a busy thread expects. `queue` waits: the server holds the turn
+ * start and runs it as its own turn once the thread is idle. The server
+ * decides between running and holding in one step, so no turn can start
+ * between its check and the start.
+ */
+export const TurnStartWhenBusy = Schema.Literals(["steer", "queue"]);
+export type TurnStartWhenBusy = typeof TurnStartWhenBusy.Type;
+
 export const ThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
@@ -1408,6 +1456,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Absent means `steer`. See `TurnStartWhenBusy`.
+  whenBusy: Schema.optional(TurnStartWhenBusy),
   // Environment for the process this turn spawns, on top of the provider
   // instance's own environment. It reaches the driver out of band and is
   // never written to an event, because its values name paths on the server's
@@ -1439,6 +1489,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  whenBusy: Schema.optional(TurnStartWhenBusy),
   // Same field, and the same rule, as `ThreadTurnStartCommand.environment`.
   environment: Schema.optional(ProviderInstanceEnvironment),
   createdAt: IsoDateTime,
@@ -1761,8 +1812,19 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
   stack: Schema.NullOr(ThreadPullRequestStack),
 });
 
+// Starts the oldest deferred turn start if the thread is free. The provider
+// reactor sends it at startup, for a thread whose turn start was lost with the
+// previous process and so will never free the thread on its own.
+const ThreadDeferredTurnStartReleaseCommand = Schema.Struct({
+  type: Schema.Literal("thread.deferred-turn-start.release"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ProjectRepositoryIdentityRecordCommand,
+  ThreadDeferredTurnStartReleaseCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
@@ -1815,6 +1877,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.interaction-mode-set",
   "thread.message-sent",
   "thread.turn-start-requested",
+  "thread.turn-start-deferred",
+  "thread.deferred-turn-start-dropped",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
@@ -2056,6 +2120,39 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Why a deferred turn start was dropped instead of started. */
+export const DeferredTurnStartDropReason = Schema.Literals([
+  // Someone pressed Stop on the running turn.
+  "turn-interrupt-requested",
+  // Someone stopped the provider session.
+  "session-stop-requested",
+  // The turn ended without completing: the session stopped, was
+  // interrupted, or failed.
+  "session-stopped",
+  "session-interrupted",
+  "session-error",
+  // The turn start the thread was waiting on failed before a turn began.
+  "turn-start-failed",
+  // The deferred turn start itself could not start, for example because the
+  // proposed plan it references is gone.
+  "turn-start-refused",
+  "thread-archived",
+  "thread-deleted",
+]);
+export type DeferredTurnStartDropReason = typeof DeferredTurnStartDropReason.Type;
+
+export const ThreadDeferredTurnStartDroppedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  reason: DeferredTurnStartDropReason,
+  droppedAt: IsoDateTime,
+});
+
+export const ThreadTurnStartDeferredPayload = Schema.Struct({
+  threadId: ThreadId,
+  ...OrchestrationDeferredTurnStart.fields,
+});
+
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
@@ -2276,6 +2373,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-start-deferred"),
+    payload: ThreadTurnStartDeferredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.deferred-turn-start-dropped"),
+    payload: ThreadDeferredTurnStartDroppedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

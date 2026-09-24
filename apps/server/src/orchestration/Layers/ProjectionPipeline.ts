@@ -37,6 +37,7 @@ import {
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import * as ProjectionThreadPullRequests from "../../persistence/ProjectionThreadPullRequests.ts";
+import * as ProjectionThreadDeferredTurnStarts from "../../persistence/ProjectionThreadDeferredTurnStarts.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -487,6 +488,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
     const projectionThreadPullRequestRepository =
       yield* ProjectionThreadPullRequests.ProjectionThreadPullRequestRepository;
+    const projectionThreadDeferredTurnStartRepository =
+      yield* ProjectionThreadDeferredTurnStarts.ProjectionThreadDeferredTurnStartRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -627,6 +630,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadPullRequestRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
+          yield* projectionThreadDeferredTurnStartRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
           yield* projectionThreadRepository.upsert({
             threadId: event.payload.threadId,
             projectId: event.payload.projectId,
@@ -667,6 +673,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.archived": {
+          // Matches the command model: archiving drops waiting turn starts.
+          yield* projectionThreadDeferredTurnStartRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
@@ -986,6 +996,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-start-deferred": {
+          const { threadId, ...turnStart } = event.payload;
+          yield* projectionThreadDeferredTurnStartRepository.insert({
+            threadId,
+            sequence: event.sequence,
+            turnStart,
+          });
+          return;
+        }
+
+        case "thread.turn-start-requested":
+        case "thread.deferred-turn-start-dropped":
+          yield* projectionThreadDeferredTurnStartRepository.delete({
+            threadId: event.payload.threadId,
+            messageId: event.payload.messageId,
+          });
+          return;
+
         case "thread.deleted": {
           // A draft retry can re-create this id later in the log. During
           // replay the attachment files on disk already belong to that later
@@ -1001,6 +1029,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
           // A tombstoned thread must not show up as linked to a pull request.
           yield* projectionThreadPullRequestRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* projectionThreadDeferredTurnStartRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
           const existingRow = yield* projectionThreadRepository.getById({
@@ -2222,6 +2253,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadPullRequests.layer),
+  Layer.provideMerge(ProjectionThreadDeferredTurnStarts.layer),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),

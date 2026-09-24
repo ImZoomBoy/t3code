@@ -133,6 +133,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   usageLimitSources: Schema.optionalKey(Schema.Boolean),
   /** Server persists custom model rates and applies them to usage summaries. */
   usagePriceOverrides: Schema.optionalKey(Schema.Boolean),
+  /** Server honours `whenBusy: "queue"` on thread.turn.start: a turn start on a
+      busy thread waits and runs as its own turn once the thread is free.
+      Older servers drop the unknown field and steer the message into the
+      running turn, so a caller must not send it when this is absent. */
+  turnStartWhenBusy: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.pin / thread.unpin commands. Same
       version-skew contract as threadSettlement. */
   threadPinning: Schema.optionalKey(Schema.Boolean),

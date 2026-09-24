@@ -46,6 +46,12 @@ import {
   requireThreadNotArchived,
   requireThreadPromptable,
 } from "./commandInvariants.ts";
+import {
+  deferTurnStartIfBusy,
+  followDeferredTurnStarts,
+  releaseDeferredTurnStart,
+  threadIsFree,
+} from "./deferredTurnStarts.ts";
 import { isFirstMateThread, resolveFleetRepo } from "./fleetThreads.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
@@ -245,7 +251,7 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   return plannedEvents;
 });
 
-export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
+const decideCommand = Effect.fn("decideCommand")(function* ({
   command,
   readModel,
   userInputActivity,
@@ -1521,6 +1527,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+      if (command.whenBusy === "queue") {
+        const deferred = yield* deferTurnStartIfBusy({
+          command,
+          thread: targetThread,
+          now: yield* nowIso,
+          eventBase: withEventBase,
+        });
+        if (deferred !== null) return deferred;
+      }
       // The client sends its own wall clock with the message. Keep it when it
       // is plausible, so a slow round trip still shows the time the user hit
       // send; otherwise fall back to the server's clock.
@@ -1627,6 +1642,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ...(userMessageEvent ? [userMessageEvent] : []),
         turnStartRequestedEvent,
       ];
+    }
+
+    case "thread.deferred-turn-start.release": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (!threadIsFree(thread) || (thread.deferredTurnStarts?.length ?? 0) === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} has no deferred turn start it can start now`,
+        });
+      }
+      return yield* releaseDeferredTurnStart({
+        readModel,
+        thread,
+        now: yield* nowIso,
+        decide: (turnStart, model) => decideCommand({ command: turnStart, readModel: model }),
+        eventBase: withEventBase,
+      });
     }
 
     case "thread.message.user.append": {
@@ -2333,4 +2365,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
   }
+});
+
+export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* (
+  input: Parameters<typeof decideCommand>[0],
+): Effect.fn.Return<
+  DecideOrchestrationCommandResult,
+  OrchestrationCommandRejection | PlatformError.PlatformError,
+  Crypto.Crypto
+> {
+  const decided = yield* decideCommand(input);
+  const planned = Array.isArray(decided) ? decided : [decided];
+  // Deferred turn starts on the command's thread may now start or be dropped.
+  // See `deferredTurnStarts.ts`.
+  const followed = yield* followDeferredTurnStarts({
+    command: input.command,
+    readModel: input.readModel,
+    planned,
+    now: yield* nowIso,
+    decide: (command, readModel) => decideCommand({ command, readModel }),
+    project: projectEvent,
+    eventBase: withEventBase,
+  });
+  return followed === null || followed.length === 0 ? decided : [...planned, ...followed];
 });

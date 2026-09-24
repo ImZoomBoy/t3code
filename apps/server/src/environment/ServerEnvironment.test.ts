@@ -180,6 +180,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
       expect(second.capabilities.threadPullRequests).toBe(true);
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
+      // A caller reads this before sending `whenBusy: "queue"`: an older server
+      // leaves it out and would steer the message instead.
+      expect(second.capabilities.turnStartWhenBusy).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
     }),
   );

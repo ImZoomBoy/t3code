@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
+import { projectDeferredTurnStarts } from "./deferredTurnStarts.ts";
 import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
@@ -323,6 +324,15 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
 }
 
 export function projectEvent(
+  model: OrchestrationReadModel,
+  event: OrchestrationEvent,
+): Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError> {
+  return projectCommandModelEvent(model, event).pipe(
+    Effect.map((next) => projectDeferredTurnStarts(next, event)),
+  );
+}
+
+function projectCommandModelEvent(
   model: OrchestrationReadModel,
   event: OrchestrationEvent,
 ): Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError> {

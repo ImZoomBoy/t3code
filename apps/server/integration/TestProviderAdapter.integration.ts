@@ -10,6 +10,7 @@ import {
   TurnId,
   ProviderDriverKind,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -27,6 +28,13 @@ import type {
 
 export interface TestTurnResponse {
   readonly events: ReadonlyArray<FixtureProviderRuntimeEvent>;
+  /**
+   * Keeps the turn running until this completes: the turn's completion events
+   * wait for it. While a turn is held, a `sendTurn` for the thread is a steer,
+   * as it is in the Claude adapter: the input joins the held turn instead of
+   * starting a new one, and is recorded in `getSteers`.
+   */
+  readonly holdCompletion?: Deferred.Deferred<void>;
   readonly mutateWorkspace?: (input: {
     readonly cwd: string;
     readonly turnCount: number;
@@ -55,6 +63,14 @@ interface SessionState {
   turnCount: number;
   readonly queuedResponses: Array<TestTurnResponse>;
   readonly rollbackCalls: Array<number>;
+  heldTurnId: TurnId | null;
+  readonly turnInputs: Array<TestTurnInput>;
+  readonly steers: Array<TestTurnInput>;
+}
+
+export interface TestTurnInput {
+  readonly turnId: TurnId;
+  readonly input: string | undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -189,6 +205,12 @@ export interface TestProviderAdapterHarness {
   readonly getStartCount: () => number;
   readonly getRollbackCalls: (threadId: ThreadId) => ReadonlyArray<number>;
   readonly getInterruptCalls: (threadId: ThreadId) => ReadonlyArray<TurnId | undefined>;
+  /** Inputs that started a turn of their own, in order. */
+  readonly getTurnInputs: (threadId: ThreadId) => ReadonlyArray<TestTurnInput>;
+  /** Inputs that joined a held turn instead of starting one. */
+  readonly getSteers: (threadId: ThreadId) => ReadonlyArray<TestTurnInput>;
+  /** Completes once the thread has seen `count` sends, as new turns and steers together. */
+  readonly awaitSends: (threadId: ThreadId, count: number) => Effect.Effect<void>;
   readonly listActiveSessionIds: () => ReadonlyArray<ThreadId>;
   readonly getApprovalResponses: (threadId: ThreadId) => ReadonlyArray<{
     readonly threadId: ThreadId;
@@ -241,6 +263,22 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
     >();
 
     const emit = (event: ProviderRuntimeEvent) => Queue.offer(runtimeEvents, event);
+    const sendWaiters: Array<{
+      readonly threadId: ThreadId;
+      readonly count: number;
+      readonly done: Deferred.Deferred<void>;
+    }> = [];
+    const sendCount = (threadId: ThreadId) => {
+      const state = sessions.get(threadId);
+      return (state?.turnInputs.length ?? 0) + (state?.steers.length ?? 0);
+    };
+    const notifySendWaiters = Effect.suspend(() =>
+      Effect.forEach(
+        sendWaiters.filter((waiter) => sendCount(waiter.threadId) >= waiter.count),
+        (waiter) => Deferred.succeed(waiter.done, undefined),
+        { discard: true },
+      ),
+    );
     const nextEventId = (threadId: ThreadId) => {
       eventCount += 1;
       return EventId.make(`test-provider:${provider}:${threadId}:${eventCount}`);
@@ -283,6 +321,9 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
           turnCount: 0,
           queuedResponses: queuedResponsesForNextSession.splice(0),
           rollbackCalls: [],
+          heldTurnId: null,
+          turnInputs: [],
+          steers: [],
         });
 
         return session;
@@ -293,6 +334,15 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         const state = sessions.get(input.threadId);
         if (!state) {
           return yield* missingSessionEffect(provider, input.threadId);
+        }
+
+        if (state.heldTurnId !== null) {
+          state.steers.push({ turnId: state.heldTurnId, input: input.input });
+          yield* notifySendWaiters;
+          return {
+            threadId: state.snapshot.threadId,
+            turnId: state.heldTurnId,
+          } satisfies ProviderTurnStartResult;
         }
 
         state.turnCount += 1;
@@ -307,6 +357,8 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
             issue: `No queued turn response for thread ${input.threadId}.`,
           });
         }
+        state.turnInputs.push({ turnId, input: input.input });
+        yield* notifySendWaiters;
 
         const assistantDeltas: string[] = [];
         const deferredTurnCompletedEvents: ProviderRuntimeEvent[] = [];
@@ -367,22 +419,36 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
           turns: [...state.snapshot.turns, nextTurn],
         };
 
-        if (deferredTurnCompletedEvents.length === 0) {
-          yield* emit({
-            type: "turn.completed",
-            eventId: nextEventId(input.threadId),
-            provider,
-            createdAt: nowIso(),
-            threadId: state.snapshot.threadId,
-            turnId,
-            payload: {
-              state: "completed",
-            },
-          });
-        } else {
-          for (const completedEvent of deferredTurnCompletedEvents) {
-            yield* emit(completedEvent);
+        const completeTurn = Effect.gen(function* () {
+          if (deferredTurnCompletedEvents.length === 0) {
+            yield* emit({
+              type: "turn.completed",
+              eventId: nextEventId(input.threadId),
+              provider,
+              createdAt: nowIso(),
+              threadId: state.snapshot.threadId,
+              turnId,
+              payload: {
+                state: "completed",
+              },
+            });
+          } else {
+            for (const completedEvent of deferredTurnCompletedEvents) {
+              yield* emit(completedEvent);
+            }
           }
+        });
+        const holdCompletion = response.holdCompletion;
+        if (holdCompletion === undefined) {
+          yield* completeTurn;
+        } else {
+          state.heldTurnId = turnId;
+          yield* Deferred.await(holdCompletion).pipe(
+            // The turn is over for the adapter before anyone hears it ended.
+            Effect.andThen(Effect.sync(() => void (state.heldTurnId = null))),
+            Effect.andThen(completeTurn),
+            Effect.forkDetach,
+          );
         }
 
         return {
@@ -537,6 +603,22 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       return [...calls];
     };
 
+    const getTurnInputs = (threadId: ThreadId): ReadonlyArray<TestTurnInput> => [
+      ...(sessions.get(threadId)?.turnInputs ?? []),
+    ];
+
+    const getSteers = (threadId: ThreadId): ReadonlyArray<TestTurnInput> => [
+      ...(sessions.get(threadId)?.steers ?? []),
+    ];
+
+    const awaitSends = (threadId: ThreadId, count: number): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (sendCount(threadId) >= count) return;
+        const done = yield* Deferred.make<void>();
+        sendWaiters.push({ threadId, count, done });
+        yield* Deferred.await(done);
+      });
+
     const listActiveSessionIds = (): ReadonlyArray<ThreadId> =>
       Array.from(sessions.values(), (state) => state.session.threadId);
 
@@ -562,6 +644,9 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       getStartCount,
       getRollbackCalls,
       getInterruptCalls,
+      getTurnInputs,
+      getSteers,
+      awaitSends,
       listActiveSessionIds,
       getApprovalResponses,
     } satisfies TestProviderAdapterHarness;

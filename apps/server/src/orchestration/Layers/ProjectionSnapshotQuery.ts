@@ -10,6 +10,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   OrchestrationProposedPlanId,
+  OrchestrationDeferredTurnStart,
   OrchestrationReadModel,
   OrchestrationThreadSearchSource,
   OrchestrationShellSnapshot,
@@ -881,6 +882,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt"
         FROM projection_thread_sessions
         ORDER BY thread_id ASC
+      `,
+  });
+
+  const listDeferredTurnStartRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({
+      threadId: ThreadId,
+      turnStart: Schema.fromJsonString(OrchestrationDeferredTurnStart),
+    }),
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          turn_start_json AS "turnStart"
+        FROM projection_thread_deferred_turn_starts
+        ORDER BY thread_id ASC, sequence ASC
       `,
   });
 
@@ -2519,6 +2536,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listDeferredTurnStartRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listDeferredTurnStarts:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listDeferredTurnStarts:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -2531,6 +2556,7 @@ pending_approval_requests AS (
             sessionRows,
             latestTurnRows,
             stateRows,
+            deferredTurnStartRows,
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
@@ -2621,6 +2647,15 @@ pending_approval_requests AS (
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>();
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
               const sessionByThread = new Map<string, OrchestrationSession>();
+              const deferredTurnStartsByThread = new Map<
+                string,
+                OrchestrationDeferredTurnStart[]
+              >();
+              for (const row of deferredTurnStartRows) {
+                const threadDeferredTurnStarts = deferredTurnStartsByThread.get(row.threadId) ?? [];
+                threadDeferredTurnStarts.push(row.turnStart);
+                deferredTurnStartsByThread.set(row.threadId, threadDeferredTurnStarts);
+              }
 
               for (let index = 0; index < sessionRows.length; index += 1) {
                 const row = sessionRows[index];
@@ -2645,6 +2680,7 @@ pending_approval_requests AS (
                 if (!row) {
                   continue;
                 }
+                const deferredTurnStarts = deferredTurnStartsByThread.get(row.threadId);
                 threads.push({
                   id: row.threadId,
                   projectId: row.projectId,
@@ -2684,6 +2720,7 @@ pending_approval_requests AS (
                   activities: [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
+                  ...(deferredTurnStarts !== undefined ? { deferredTurnStarts } : {}),
                 });
               }
 

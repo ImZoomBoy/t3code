@@ -19,6 +19,7 @@ import {
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -2268,5 +2269,317 @@ describe("OrchestrationEngine", () => {
     expect(withoutOrigin?.metadata.origin).toBeUndefined();
 
     await system.dispose();
+  });
+});
+
+describe("turn starts that wait for an idle thread", () => {
+  const threadId = ThreadId.make("deferred-thread");
+  const projectId = asProjectId("deferred-project");
+  type System = Awaited<ReturnType<typeof createOrchestrationSystem>>;
+  type TurnStartCommand = Extract<OrchestrationCommand, { type: "thread.turn.start" }>;
+
+  const setSession = (
+    commandId: string,
+    status: "running" | "ready" | "stopped" | "interrupted" | "error",
+    at = now(),
+  ): OrchestrationCommand => ({
+    type: "thread.session.set",
+    commandId: CommandId.make(commandId),
+    threadId,
+    createdAt: at,
+    session: {
+      threadId,
+      status,
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: status === "running" ? asTurnId(`turn-${commandId}`) : null,
+      lastError: status === "error" ? "The provider failed." : null,
+      updatedAt: at,
+    },
+  });
+
+  const turnStart = (id: string, extra: Partial<TurnStartCommand> = {}): TurnStartCommand => ({
+    type: "thread.turn.start",
+    commandId: CommandId.make(id),
+    threadId,
+    message: {
+      messageId: asMessageId(`msg-${id}`),
+      role: "user",
+      text: `message from ${id}`,
+      attachments: [],
+    },
+    runtimeMode: "full-access",
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    createdAt: now(),
+    ...extra,
+  });
+
+  const queueWake = (extra: Partial<TurnStartCommand> = {}) =>
+    turnStart("wake", { whenBusy: "queue", ...extra });
+
+  /** A project and a thread, with a session in `status` if one is given. */
+  async function seededThread(
+    status: "running" | "ready" | null,
+    databasePath?: string,
+    at = now(),
+  ) {
+    const system = await createOrchestrationSystem(databasePath);
+    await system.run(
+      system.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("deferred-project"),
+        projectId,
+        title: "Deferred turn starts",
+        workspaceRoot: "/tmp/deferred-turn-starts",
+        createdAt: at,
+      }),
+    );
+    await system.run(
+      system.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("deferred-thread"),
+        threadId,
+        projectId,
+        title: "Deferred turn starts",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: at,
+      }),
+    );
+    if (status !== null) {
+      await system.run(system.engine.dispatch(setSession(`person-${status}`, status, at)));
+    }
+    return system;
+  }
+
+  const dispatch = (system: System, command: OrchestrationCommand) =>
+    system.run(system.engine.dispatch(command));
+
+  const eventsFor = async (system: System, commandId: string) =>
+    (
+      await system.run(
+        Stream.runCollect(system.engine.readEvents(0)).pipe(
+          Effect.map((chunk) => Array.from(chunk)),
+        ),
+      )
+    ).filter((event) => event.commandId === commandId);
+
+  const typesFor = async (system: System, commandId: string) =>
+    (await eventsFor(system, commandId)).map((event) => event.type);
+
+  it("survives a restart and starts once when the turn then ends normally", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-deferred-turn-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    let system = await seededThread("running", databasePath);
+    try {
+      await dispatch(system, queueWake());
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+
+      // Startup continued the interrupted turn, which then completes.
+      await dispatch(system, setSession("continued", "running"));
+      expect(await typesFor(system, "wake")).toEqual(["thread.turn-start-deferred"]);
+      await dispatch(system, setSession("continued-done", "ready"));
+      expect(await typesFor(system, "wake")).toEqual([
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+
+      // Neither a later idle transition nor another restart starts it again.
+      await dispatch(system, setSession("wake-running", "running"));
+      await dispatch(system, setSession("wake-done", "ready"));
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+      await dispatch(system, setSession("after-second-restart", "ready"));
+      expect(
+        (await typesFor(system, "wake")).filter((type) => type === "thread.turn-start-requested"),
+      ).toHaveLength(1);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [
+      "Stop",
+      "turn-interrupt-requested",
+      {
+        type: "thread.turn.interrupt",
+        commandId: CommandId.make("stop"),
+        threadId,
+        createdAt: now(),
+      },
+    ],
+    [
+      "stopping the session",
+      "session-stop-requested",
+      {
+        type: "thread.session.stop",
+        commandId: CommandId.make("stop-session"),
+        threadId,
+        createdAt: now(),
+      },
+    ],
+    ["the session stopping", "session-stopped", setSession("stopped", "stopped")],
+    [
+      "the session being interrupted",
+      "session-interrupted",
+      setSession("interrupted", "interrupted"),
+    ],
+    ["the session failing", "session-error", setSession("failed", "error")],
+    [
+      "archiving the thread",
+      "thread-archived",
+      { type: "thread.archive", commandId: CommandId.make("archive"), threadId },
+    ],
+  ] as const)("%s drops a held turn start with a reason", async (_label, reason, command) => {
+    const system = await seededThread("running");
+    try {
+      await dispatch(system, queueWake());
+      await dispatch(system, command);
+      const [, drop] = await eventsFor(system, "wake");
+      expect(drop?.type).toBe("thread.deferred-turn-start-dropped");
+      expect(drop?.type === "thread.deferred-turn-start-dropped" && drop.payload).toMatchObject({
+        messageId: "msg-wake",
+        reason,
+      });
+
+      // The thread going idle afterwards does not start what was dropped.
+      await dispatch(system, setSession("idle-after-drop", "ready"));
+      expect(await typesFor(system, "wake")).toEqual([
+        "thread.turn-start-deferred",
+        "thread.deferred-turn-start-dropped",
+      ]);
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("deleting the thread drops a held turn start with a reason", async () => {
+    const system = await seededThread("running");
+    try {
+      await dispatch(system, queueWake());
+      await dispatch(system, {
+        type: "thread.delete",
+        commandId: CommandId.make("delete"),
+        threadId,
+      });
+      const [, drop] = await eventsFor(system, "wake");
+      expect(drop?.type === "thread.deferred-turn-start-dropped" && drop.payload.reason).toBe(
+        "thread-deleted",
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  // Before, a start held behind another turn start only moved on a session
+  // change it could not see as the thread going free, so it waited for some
+  // later, unrelated turn to end.
+  it("starts once the turn start it waits on settles without a turn", async () => {
+    const at = DateTime.formatIso(DateTime.nowUnsafe());
+    const system = await seededThread("ready", undefined, at);
+    try {
+      // The person's start is asked for but no turn has taken it up.
+      await dispatch(system, turnStart("person", { createdAt: at }));
+      await dispatch(system, queueWake({ createdAt: at }));
+      await dispatch(system, turnStart("second-wake", { whenBusy: "queue", createdAt: at }));
+      expect(await typesFor(system, "wake")).toEqual(["thread.turn-start-deferred"]);
+
+      // It settles without a turn, as a compaction does, and the session goes
+      // idle. That frees the thread, so the first held start runs, and the
+      // second waits behind it rather than behind a turn that never comes.
+      await dispatch(
+        system,
+        setSession("person-settled", "ready", DateTime.formatIso(DateTime.nowUnsafe())),
+      );
+      expect(await typesFor(system, "wake")).toEqual([
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      expect(await typesFor(system, "second-wake")).toEqual(["thread.turn-start-deferred"]);
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("drops a held turn start when the turn start ahead of it fails", async () => {
+    const system = await seededThread("ready");
+    try {
+      await dispatch(system, turnStart("person"));
+      await dispatch(system, queueWake());
+      await dispatch(system, {
+        type: "thread.activity.append",
+        commandId: CommandId.make("person-failed"),
+        threadId,
+        createdAt: now(),
+        activity: {
+          id: EventId.make("person-failed"),
+          kind: "provider.turn.start.failed",
+          summary: "Provider turn start failed",
+          tone: "error",
+          turnId: null,
+          createdAt: now(),
+          payload: { detail: "no provider", requestId: "msg-person" },
+        },
+      });
+      const [, drop] = await eventsFor(system, "wake");
+      expect(drop?.type === "thread.deferred-turn-start-dropped" && drop.payload.reason).toBe(
+        "turn-start-failed",
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("after a restart, release starts a held start whose turn start died with the process", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-deferred-turn-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    let system = await seededThread("ready", databasePath);
+    try {
+      await dispatch(system, turnStart("person"));
+      await dispatch(system, queueWake());
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+
+      const release = (commandId: string): OrchestrationCommand => ({
+        type: "thread.deferred-turn-start.release",
+        commandId: CommandId.make(commandId),
+        threadId,
+        createdAt: now(),
+      });
+      await dispatch(system, release("release"));
+      expect(await typesFor(system, "wake")).toEqual([
+        "thread.turn-start-deferred",
+        "thread.message-sent",
+        "thread.turn-start-requested",
+      ]);
+      await expect(dispatch(system, release("release-again"))).rejects.toThrow(
+        "no deferred turn start it can start now",
+      );
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a waiting turn start that carries an environment", async () => {
+    const system = await seededThread("running");
+    try {
+      await expect(
+        dispatch(
+          system,
+          queueWake({ environment: [{ name: "FM_HOME", value: "/tmp/fm", sensitive: false }] }),
+        ),
+      ).rejects.toThrow("cannot carry an environment");
+    } finally {
+      await system.dispose();
+    }
   });
 });

@@ -35,6 +35,7 @@ import * as Scope from "effect/Scope";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
+import { threadIsFree } from "./orchestration/deferredTurnStarts.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationReactor from "./orchestration/Services/OrchestrationReactor.ts";
@@ -737,6 +738,38 @@ export const reconcileProviderSessions = Effect.gen(function* () {
     }
 
     yield* settleAsError(ORPHANED_PROVIDER_SESSION_ERROR);
+  }
+
+  // A deferred turn start waits for its thread to free up. The turn start it
+  // waited on may have died with the previous process, leaving a thread that
+  // is free now and will never free up again on its own. Orphaned threads
+  // were settled above, which drops or keeps their deferred starts.
+  const orphanedThreadIds = new Set(orphanedThreads.map((thread) => thread.id));
+  for (const thread of threads) {
+    if (
+      orphanedThreadIds.has(thread.id) ||
+      (thread.deferredTurnStarts?.length ?? 0) === 0 ||
+      !threadIsFree(thread)
+    ) {
+      continue;
+    }
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.deferred-turn-start.release",
+        commandId: CommandId.make(yield* crypto.randomUUIDv4),
+        threadId: thread.id,
+        createdAt: DateTime.formatIso(yield* DateTime.now),
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("failed to start a deferred turn start after restart", {
+                threadId: thread.id,
+                cause,
+              }),
+        ),
+      );
   }
 }).pipe(
   Effect.catchCause((cause) =>

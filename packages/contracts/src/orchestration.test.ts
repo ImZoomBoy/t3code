@@ -397,6 +397,31 @@ it.effect("ignores an unknown field on thread.turn.start", () =>
   }),
 );
 
+it.effect("carries whenBusy on thread.turn.start and refuses an unknown value", () =>
+  Effect.gen(function* () {
+    const command = {
+      type: "thread.turn.start",
+      commandId: "cmd-turn-queued",
+      threadId: "thread-1",
+      message: { messageId: "msg-1", role: "user", text: "wake", attachments: [] },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const queued = yield* decodeThreadTurnStartCommand({ ...command, whenBusy: "queue" });
+    assert.strictEqual(queued.whenBusy, "queue");
+    // A client sends the same shape over the socket.
+    const fromClient = yield* decodeClientOrchestrationCommand({ ...command, whenBusy: "queue" });
+    assert.strictEqual(fromClient.type === "thread.turn.start" && fromClient.whenBusy, "queue");
+    const unset = yield* decodeThreadTurnStartCommand(command);
+    assert.strictEqual(unset.whenBusy, undefined);
+    const unknown = yield* Effect.exit(
+      decodeThreadTurnStartCommand({ ...command, whenBusy: "interrupt" }),
+    );
+    assert.strictEqual(Exit.isFailure(unknown), true);
+  }),
+);
+
 it.effect("accepts inline images, uploaded images, and uploaded files from clients", () =>
   Effect.gen(function* () {
     const command = yield* decodeClientOrchestrationCommand({
