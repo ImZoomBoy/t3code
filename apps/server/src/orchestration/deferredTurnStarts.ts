@@ -34,6 +34,7 @@ import type {
   OrchestrationDeferredTurnStart,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationSession,
   OrchestrationThread,
   ThreadId,
 } from "@t3tools/contracts";
@@ -79,29 +80,30 @@ type Project = (
 ) => Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError>;
 
 /**
- * No turn is running or starting and none has been asked for. A session that
- * ended (`stopped`, `interrupted`, `error`) runs no turn, so its thread is free
- * unless it still names an active turn; a turn start there starts a new
- * session, as a direct send does.
+ * A session with no turn running or starting. A `stopped` or `interrupted`
+ * session ended and runs no turn unless it still names one; a turn start there
+ * starts a new session, as a direct send does. An `error` session is not free:
+ * a runtime error without a turn id leaves a live turn unnamed.
  */
+function sessionIsFree(session: OrchestrationSession | null): boolean {
+  if (session === null) return true;
+  switch (session.status) {
+    case "idle":
+    case "ready":
+      return true;
+    case "stopped":
+    case "interrupted":
+      return session.activeTurnId === null;
+    case "error":
+    case "starting":
+    case "running":
+      return false;
+  }
+}
+
+/** No turn is running or starting and none has been asked for. */
 export function threadIsFree(thread: OrchestrationThread): boolean {
-  const session = thread.session ?? null;
-  const sessionIsFree = (() => {
-    if (session === null) return true;
-    switch (session.status) {
-      case "idle":
-      case "ready":
-        return true;
-      case "stopped":
-      case "interrupted":
-      case "error":
-        return session.activeTurnId === null;
-      case "starting":
-      case "running":
-        return false;
-    }
-  })();
-  return sessionIsFree && (thread.pendingTurnStart ?? null) === null;
+  return sessionIsFree(thread.session ?? null) && (thread.pendingTurnStart ?? null) === null;
 }
 
 /** A start that asks to queue waits behind anything busy and behind earlier waiting starts. */

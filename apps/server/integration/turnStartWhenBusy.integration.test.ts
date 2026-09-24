@@ -335,27 +335,33 @@ it.live("a turn start that asks to queue runs at once on an idle thread", () =>
   ),
 );
 
+/** Records the session as ended with the given status and no active turn. */
+const setEndedSession = (harness: OrchestrationIntegrationHarness, status: "stopped" | "error") =>
+  Effect.gen(function* () {
+    const at = liveNow();
+    yield* harness.engine.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make(`cmd-session-${status}`),
+      threadId: THREAD_ID,
+      session: {
+        threadId: THREAD_ID,
+        status,
+        providerName: PROVIDER,
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: status === "error" ? "provider error" : null,
+        updatedAt: at,
+      },
+      createdAt: at,
+    });
+  });
+
 it.live("a turn start that asks to queue runs at once on a thread whose session stopped", () =>
   withHarness((harness) =>
     Effect.gen(function* () {
       yield* seedProjectAndThread(harness);
       // A restart or the idle reaper leaves the session stopped with no turn.
-      const stoppedAt = liveNow();
-      yield* harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-stopped"),
-        threadId: THREAD_ID,
-        session: {
-          threadId: THREAD_ID,
-          status: "stopped",
-          providerName: PROVIDER,
-          runtimeMode: "full-access",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: stoppedAt,
-        },
-        createdAt: stoppedAt,
-      });
+      yield* setEndedSession(harness, "stopped");
       yield* harness.adapterHarness!.queueTurnResponseForNextSession(turnResponse("wake reply"));
 
       const idle = yield* watchEvents(harness, isSessionStatus("ready"));
@@ -369,6 +375,21 @@ it.live("a turn start that asks to queue runs at once on a thread whose session 
         "wake message",
       ]);
       yield* Fiber.join(idle);
+    }),
+  ),
+);
+
+it.live("a turn start that asks to queue waits on a thread whose session errored", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+      // A runtime error without a turn id records no active turn, though a
+      // turn may still be running.
+      yield* setEndedSession(harness, "error");
+
+      yield* startTurn(harness, { id: "wake", text: "wake message", whenBusy: "queue" });
+      assert.deepEqual(yield* eventTypesFor(harness, "cmd-wake"), ["thread.turn-start-deferred"]);
+      assert.deepEqual(harness.adapterHarness!.getTurnInputs(THREAD_ID), []);
     }),
   ),
 );
