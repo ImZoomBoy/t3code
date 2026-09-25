@@ -165,6 +165,7 @@ import {
   buildFleetRows,
   buildFleetTree,
   FIRST_MATE_TONE_CLASS,
+  type FleetBranch,
   FLEET_ROLE_WORDS,
   type FleetParked,
   resolveParkedState,
@@ -2421,6 +2422,51 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
 });
 
+/**
+ * The fleet tree as sidebar rows. Each second mate's fold is a saved sidebar
+ * setting, like a project's, and each row's colour comes from the project as
+ * it is now.
+ */
+export function useFleetTreeRows(
+  fleetBranches: readonly FleetBranch<EnvironmentThreadShell>[],
+  fleetParked: ReadonlyMap<EnvironmentThreadShell, FleetParked>,
+  projectByKey: ReadonlyMap<string, EnvironmentProject>,
+) {
+  const fleetRepoExpandedById = useUiStateStore((store) => store.fleetRepoExpandedById);
+  const setFleetRepoExpanded = useUiStateStore((store) => store.setFleetRepoExpanded);
+  return useMemo(
+    () =>
+      buildFleetRows(fleetBranches, {
+        isFolded: (repo) => fleetRepoExpandedById[repo] === false,
+        parkedState: (thread) => fleetParked.get(thread) ?? null,
+      }).map((row) => ({
+        thread: row.thread,
+        // A parked fleet row draws as today's settled or snoozed row, so it
+        // keeps its un-settle or wake control where it stands.
+        section: row.parked ?? ("active" as const),
+        placement: {
+          depth: row.depth,
+          theme: {
+            kind: "project",
+            project: projectByKey.get(`${row.theme.environmentId}:${row.theme.projectId}`) ?? null,
+            repo: row.theme.fleetRepo ?? "",
+          },
+          quiet: row.quiet,
+          parked: row.parked,
+          lifecycle: row.thread.fleetRole === "second-mate" ? "undo-only" : "default",
+          pin: row.pin,
+          fold: row.fold
+            ? {
+                expanded: row.fold.expanded,
+                onToggle: () => setFleetRepoExpanded(row.fold!.repo, !row.fold!.expanded),
+              }
+            : undefined,
+        } satisfies FleetRowPlacement,
+      })),
+    [fleetBranches, fleetParked, fleetRepoExpandedById, projectByKey, setFleetRepoExpanded],
+  );
+}
+
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -2946,44 +2992,7 @@ export default function Sidebar() {
     };
   }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
 
-  // Second mates fold their workers away. Folding is a view choice, so it
-  // lives here rather than on the server.
-  const [foldedFleetRepos, setFoldedFleetRepos] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleFleetRepo = useCallback((repo: string) => {
-    setFoldedFleetRepos((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(repo)) next.add(repo);
-      return next;
-    });
-  }, []);
-  const fleetRows = useMemo(
-    () =>
-      buildFleetRows(fleetBranches, {
-        isFolded: (repo) => foldedFleetRepos.has(repo),
-        parkedState: (thread) => fleetParked.get(thread) ?? null,
-      }).map((row) => ({
-        thread: row.thread,
-        // A parked fleet row draws as today's settled or snoozed row, so it
-        // keeps its un-settle or wake control where it stands.
-        section: row.parked ?? ("active" as const),
-        placement: {
-          depth: row.depth,
-          theme: {
-            kind: "project",
-            project: projectByKey.get(`${row.theme.environmentId}:${row.theme.projectId}`) ?? null,
-            repo: row.theme.fleetRepo ?? "",
-          },
-          quiet: row.quiet,
-          parked: row.parked,
-          lifecycle: row.thread.fleetRole === "second-mate" ? "undo-only" : "default",
-          pin: row.pin,
-          fold: row.fold
-            ? { expanded: row.fold.expanded, onToggle: () => toggleFleetRepo(row.fold!.repo) }
-            : undefined,
-        } satisfies FleetRowPlacement,
-      })),
-    [fleetBranches, fleetParked, foldedFleetRepos, projectByKey, toggleFleetRepo],
-  );
+  const fleetRows = useFleetTreeRows(fleetBranches, fleetParked, projectByKey);
   const fleetThreads = useMemo(() => fleetRows.map((row) => row.thread), [fleetRows]);
   // Every thread in the fleet tree, folded ones included.
   const fleetTreeThreadKeys = useMemo(
