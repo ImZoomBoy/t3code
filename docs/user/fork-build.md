@@ -4,8 +4,8 @@ This build is a fork of T3 Code, not an official release. It installs beside an 
 rather than over it, so both can be on the same machine at once. Four things tell you which one you
 are looking at.
 
-- **The icon.** The fork's icon is the T3 Code plate tinted orange with a round white **AP** badge in
-  the corner. An official install keeps the plain black plate. This is the quickest check in the
+- **The icon.** The fork's icon is an orange T3 tile with a round navy **SI** badge in the corner.
+  An official install keeps the plain black plate. This is the quickest check in the
   taskbar, the dock and Alt-Tab.
 - **The window title.** The fork's window and About panel read **T3 Code Fork**, with the release
   stage after it, for example `T3 Code Fork (Alpha)`. An official install reads `T3 Code`.

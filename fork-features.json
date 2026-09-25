@@ -294,6 +294,29 @@
       "test": "apps/web/src/components/ChatView.logic.test.ts",
       "testName": "getLiveBackgroundWorkRestartWarning",
       "patchesUpstream": true
+    },
+    {
+      "name": "fork-app-icon",
+      "description": "The fork's app icon: an orange T3 tile with a navy corner badge carrying the badge label from forkBuild.ts. forkAppIcon.ts holds its geometry once; the sidebar header renders it as SVG and scripts/generate-fork-icons.ts rasterises it into every icon file the desktop and web builds ship, so the taskbar icon and the header icon match. forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and assets/fork/ are the fork's own and upstream has none of them, so the tests cannot pass on plain upstream. Issues #59 and #154.",
+      "keep": "forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and every file in assets/fork/ are ours whole. The ./forkAppIcon export survives in packages/shared/package.json, the fork* icon paths and the fork web brand survive in brand-assets.ts, and SidebarChrome.tsx still shows ForkAppIcon in the sidebar header. Everything else in those three files takes upstream. After any merge, run node scripts/generate-fork-icons.ts; the generator test fails if the committed icons drift from it.",
+      "files": [
+        "packages/shared/src/forkAppIcon.ts",
+        "packages/shared/src/forkBuild.ts",
+        "packages/shared/package.json",
+        "apps/web/src/components/ForkAppIcon.tsx",
+        "apps/web/src/components/sidebar/SidebarChrome.tsx",
+        "scripts/generate-fork-icons.ts",
+        "scripts/lib/brand-assets.ts",
+        "assets/fork/fork-universal-1024.png",
+        "assets/fork/fork-macos-1024.png",
+        "assets/fork/fork-windows.ico",
+        "assets/fork/fork-web-favicon.ico",
+        "assets/fork/fork-web-favicon-16x16.png",
+        "assets/fork/fork-web-favicon-32x32.png",
+        "assets/fork/fork-web-apple-touch-180.png"
+      ],
+      "test": ["packages/shared/src/forkAppIcon.test.ts", "scripts/generate-fork-icons.test.ts"],
+      "patchesUpstream": true
     }
   ]
 }
