@@ -22,7 +22,7 @@ export const FORK_APP_ID = "com.autoprintworks.t3code";
 
 const FORK_APP_BASE_NAME = "T3 Code Fork";
 const FORK_TAG_LABEL = "FORK";
-const FORK_BADGE_LABEL = "AP";
+const FORK_BADGE_LABEL = "SI";
 
 export interface ForkBuildIdentity {
   /** The `appId` of every artifact built here, and the signal this seam reads. */

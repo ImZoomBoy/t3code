@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { collectForkIconArtifacts } from "./generate-fork-icons.ts";
+import { buildForkIconArtifacts } from "./generate-fork-icons.ts";
 
 describe("generate-fork-icons", () => {
   // The fork's artwork is committed, so nothing at build time would notice if a
@@ -16,7 +16,7 @@ describe("generate-fork-icons", () => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const repoRoot = yield* path.fromFileUrl(new URL("..", import.meta.url));
-        const artifacts = yield* collectForkIconArtifacts();
+        const artifacts = buildForkIconArtifacts();
 
         assert.isAbove(artifacts.length, 0);
 
