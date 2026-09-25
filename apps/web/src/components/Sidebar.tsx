@@ -170,6 +170,7 @@ import {
   resolveParkedState,
   sidebarSectionFor,
 } from "./sidebar/fleetSidebar.logic";
+import { useFleetFolds } from "./sidebar/fleetFolds";
 import { FleetTone, type FleetTheme } from "./sidebar/FleetTone";
 import { resolveReadOnlyThreadModel } from "./chat/readOnlyThreadModel.logic";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
@@ -2946,16 +2947,10 @@ export default function Sidebar() {
     };
   }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
 
-  // Second mates fold their workers away. Folding is a view choice, so it
-  // lives here rather than on the server.
-  const [foldedFleetRepos, setFoldedFleetRepos] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleFleetRepo = useCallback((repo: string) => {
-    setFoldedFleetRepos((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(repo)) next.add(repo);
-      return next;
-    });
-  }, []);
+  // Second mates fold their workers away. The folds outlive this component,
+  // which Settings unmounts.
+  const foldedFleetRepos = useFleetFolds((folds) => folds.folded);
+  const toggleFleetRepo = useFleetFolds((folds) => folds.toggle);
   const fleetRows = useMemo(
     () =>
       buildFleetRows(fleetBranches, {
