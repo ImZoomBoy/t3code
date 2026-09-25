@@ -112,6 +112,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       fleet-owned second mate thread promptable. Older servers refuse the
       unknown command, so the fleet must not send it when this is absent. */
   fleetThreadReadOnlyClear: Schema.optionalKey(Schema.Boolean),
+  /** Server accepts thread.fleet-berth.set from the fleet, which sets
+      fleetRole and fleetRepo on a fleet-owned thread. Older servers refuse
+      the unknown command, so the fleet must not send it when this is absent. */
+  fleetThreadBerthSet: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.settle / thread.unsettle commands. Absent on
       pre-settlement servers, so clients treat missing as unsupported and
       never send the commands under version skew. */

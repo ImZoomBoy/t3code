@@ -52,7 +52,12 @@ import {
   releaseDeferredTurnStart,
   threadIsFree,
 } from "./deferredTurnStarts.ts";
-import { isFirstMateThread, readOnlyClearRefusal, resolveFleetRepo } from "./fleetThreads.ts";
+import {
+  isFirstMateThread,
+  readOnlyClearRefusal,
+  resolveFleetBerth,
+  resolveFleetRepo,
+} from "./fleetThreads.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
@@ -968,6 +973,41 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
         payload: {
           threadId: command.threadId,
           updatedAt: alreadyPromptable ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.fleet-berth.set": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const berth = resolveFleetBerth(thread, command);
+      if ("refusal" in berth) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: berth.refusal,
+        });
+      }
+      const { fleetRepo } = berth;
+      // Idempotent by re-emission (see thread.read-only.clear): the berth a
+      // thread already has keeps its updatedAt, so it projects as a no-op.
+      const unchanged = thread.fleetRole === command.fleetRole && thread.fleetRepo === fleetRepo;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.fleet-berth-set",
+        payload: {
+          threadId: command.threadId,
+          fleetRole: command.fleetRole,
+          fleetRepo,
+          updatedAt: unchanged ? thread.updatedAt : occurredAt,
         },
       };
     }
