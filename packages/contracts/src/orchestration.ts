@@ -892,8 +892,9 @@ export const OrchestrationThread = Schema.Struct({
   // fleet-owned - an ACP worker mirror, say - stays refused to the fleet too.
   // Optional so old servers/clients interop; absent = false.
   fleetOwned: Schema.optional(Schema.Boolean),
-  // See `FleetRole`. Set once at creation and never cleared. Optional so old
-  // servers/clients interop; absent = an ordinary thread.
+  // See `FleetRole`. Set at creation, or later by the fleet with
+  // `thread.fleet-berth.set` on a thread it owns; never cleared. Optional so
+  // old servers/clients interop; absent = an ordinary thread.
   fleetRole: Schema.optional(Schema.NullOr(FleetRole)),
   // The repository a fleet thread works for, such as "t3code". Null for the
   // First Mate thread, which works for no one repository.
@@ -1587,14 +1588,37 @@ const ThreadReadOnlyClearCommand = Schema.Struct({
 
 const WireThreadReadOnlyClearCommand = Schema.Struct(ThreadReadOnlyClearCommandFields);
 
+const ThreadFleetBerthSetCommandFields = {
+  type: Schema.Literal("thread.fleet-berth.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // The decider refuses "first-mate": only `thread.create` makes the First
+  // Mate thread, so the one-live-First-Mate rule has one place to hold.
+  fleetRole: FleetRole,
+  fleetRepo: Schema.String,
+  createdAt: IsoDateTime,
+} as const;
+
+/**
+ * Sets `fleetRole` and `fleetRepo` on a fleet-owned thread, for threads the
+ * fleet created before it sent them. The fleet's alone: `issuer` is stamped
+ * the same way as `ThreadReadOnlyClearCommand.issuer`.
+ */
+const ThreadFleetBerthSetCommand = Schema.Struct({
+  ...ThreadFleetBerthSetCommandFields,
+  issuer: Schema.optional(Schema.Literal("fleet")),
+});
+
+const WireThreadFleetBerthSetCommand = Schema.Struct(ThreadFleetBerthSetCommandFields);
+
 /**
  * The twenty-one commands that read the same whoever sent them.
  *
  * `thread.create` and `thread.turn.start` are the two that do not: each has a
  * narrow client shape and a wide server shape, and the three unions below
- * differ in which of the two they pick. `thread.read-only.clear` is the third
- * difference: the fleet's alone, so the wide and wire unions carry it and the
- * client union leaves it out. Written once here so the twenty-one cannot drift
+ * differ in which of the two they pick. `thread.read-only.clear` and
+ * `thread.fleet-berth.set` are the other difference: the fleet's alone, so
+ * the wide and wire unions carry them and the client union leaves them out. Written once here so the twenty-one cannot drift
  * between them.
  */
 const SharedOrchestrationCommands = [
@@ -1631,6 +1655,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCreateCommand,
   ThreadTurnStartCommand,
   ThreadReadOnlyClearCommand,
+  ThreadFleetBerthSetCommand,
   ...SharedOrchestrationCommands,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -1661,8 +1686,9 @@ export type OrchestrationCommandIssuer = typeof OrchestrationCommandIssuer.Type;
  * before it knows who sent it.
  *
  * The client union with the wider `thread.create`, so a fleet create can
- * carry `readOnly` at all, and with `thread.read-only.clear` in its unstamped
- * shape, so the fleet can send it at all. Decoding once and then vetting the result is
+ * carry `readOnly` at all, and with `thread.read-only.clear` and
+ * `thread.fleet-berth.set` in their unstamped shapes, so the fleet can send
+ * them at all. Decoding once and then vetting the result is
  * deliberate: there is one schema on the wire and one place that decides what
  * survives it. That place is `normalizeDispatchCommand`, which refuses a
  * `readOnly` an ordinary client sent rather than quietly dropping it, and
@@ -1672,6 +1698,7 @@ export const WireOrchestrationCommand = Schema.Union([
   ThreadCreateCommand,
   ClientThreadTurnStartCommand,
   WireThreadReadOnlyClearCommand,
+  WireThreadFleetBerthSetCommand,
   ...SharedOrchestrationCommands,
 ]);
 export type WireOrchestrationCommand = typeof WireOrchestrationCommand.Type;
@@ -1901,6 +1928,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unpinned",
   "thread.pin-reordered",
   "thread.read-only-cleared",
+  "thread.fleet-berth-set",
   "thread.meta-updated",
   "thread.pull-request-linked",
   "thread.pull-request-unlinked",
@@ -2066,6 +2094,13 @@ export const ThreadPinReorderedPayload = Schema.Struct({
 
 export const ThreadReadOnlyClearedPayload = Schema.Struct({
   threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadFleetBerthSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  fleetRole: FleetRole,
+  fleetRepo: TrimmedNonEmptyString,
   updatedAt: IsoDateTime,
 });
 
@@ -2379,6 +2414,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.read-only-cleared"),
     payload: ThreadReadOnlyClearedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.fleet-berth-set"),
+    payload: ThreadFleetBerthSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

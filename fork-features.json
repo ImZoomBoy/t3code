@@ -205,6 +205,31 @@
       "patchesUpstream": true
     },
     {
+      "name": "fm-fleet-thread-berth-set",
+      "description": "The fleet can set fleetRole and fleetRepo on a thread it already owns with thread.fleet-berth.set, to repair threads created before the fleet sent them. Only the fleet issuer may send it, only on a fleet-owned, unarchived thread that is not the First Mate thread, and never with fleetRole first-mate, so only thread.create makes a First Mate thread. It records a thread.fleet-berth-set event that sets fleet_role and fleet_repo on the thread and its shell row, so it survives a restart and clients update. The berth a thread already has is accepted and keeps its updatedAt. The server advertises fleetThreadBerthSet in its environment capabilities.",
+      "keep": "fleetThreadBerthSet.test.ts is ours whole. The thread.fleet-berth-set case survives in threadReducer.test.ts, the fleetThreadBerthSet assertion survives in ServerEnvironment.test.ts, and the fleet berth set test survives in server.test.ts. The thread.fleet-berth.set command, the thread.fleet-berth-set event and payload, and the OrchestrationThread.fleetRole comment survive in orchestration.ts; the fleetThreadBerthSet capability survives in environment.ts and ServerEnvironment.ts; resolveFleetBerth survives in fleetThreads.ts; the issuer stamp for the command survives in Normalizer.ts; the command case survives in decider.ts; the event case survives in projector.ts, ProjectionPipeline.ts and threadReducer.ts; the payload re-export survives in Schemas.ts; and the thread.fleet-berth.set sentence of the Fleet role row survives in docs/internals/glossary.md. Everything else in those files takes upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/environment.ts",
+        "packages/client-runtime/src/state/threadReducer.ts",
+        "apps/server/src/environment/ServerEnvironment.ts",
+        "apps/server/src/orchestration/fleetThreads.ts",
+        "apps/server/src/orchestration/Normalizer.ts",
+        "apps/server/src/orchestration/decider.ts",
+        "apps/server/src/orchestration/projector.ts",
+        "apps/server/src/orchestration/Schemas.ts",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts",
+        "docs/internals/glossary.md"
+      ],
+      "test": [
+        "apps/server/src/orchestration/fleetThreadBerthSet.test.ts",
+        "packages/client-runtime/src/state/threadReducer.test.ts",
+        "apps/server/src/environment/ServerEnvironment.test.ts",
+        "apps/server/src/server.test.ts"
+      ],
+      "patchesUpstream": true
+    },
+    {
       "name": "fm-turn-start-when-busy",
       "description": "A turn start can ask to wait for an idle thread with whenBusy: \"queue\", so a supervisor's wake never steers into a turn the person just started. The decider holds it while the thread is busy, starts it in the command that frees the thread after a normal turn end, and drops it with a recorded reason on Stop, a stopped, interrupted or failed session, a failed turn start, archive or delete. It is persisted, so it survives a restart and runs once. The server advertises turnStartWhenBusy in its environment capabilities.",
       "keep": "deferredTurnStarts.ts, ProjectionThreadDeferredTurnStarts.ts, fork migration 9 and turnStartWhenBusy.integration.test.ts are ours whole. The whenBusy option, the thread.turn-start-deferred and thread.deferred-turn-start-dropped events, the thread.deferred-turn-start.release command and the deferredTurnStarts and pendingTurnStart fields survive in orchestration.ts; the turnStartWhenBusy capability survives in environment.ts and ServerEnvironment.ts; the whenBusy queue branch, the release command case and the decideOrchestrationCommand wrapper that calls followDeferredTurnStarts survive in decider.ts; the projectEvent wrapper that calls projectDeferredTurnStarts survives in projector.ts; the deferred-turn-start table writes and reads survive in ProjectionPipeline.ts and ProjectionSnapshotQuery.ts; the startup release loop survives in serverRuntimeStartup.ts; and holdCompletion, getSteers, getTurnInputs and awaitSends survive in TestProviderAdapter.integration.ts. Everything else in those files takes upstream.",

@@ -48,6 +48,7 @@ import {
   ThreadPullRequestSyncedPayload,
   ThreadPullRequestUnlinkedPayload,
   ThreadReadOnlyClearedPayload,
+  ThreadFleetBerthSetPayload,
   ThreadSnoozedPayload,
   ThreadUnpinnedPayload,
   ThreadUnarchivedPayload,
@@ -610,6 +611,18 @@ function projectCommandModelEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             readOnly: false,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.fleet-berth-set":
+      return decodeForEvent(ThreadFleetBerthSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            fleetRole: payload.fleetRole,
+            fleetRepo: payload.fleetRepo,
             updatedAt: payload.updatedAt,
           }),
         })),

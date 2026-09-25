@@ -265,6 +265,17 @@ export function applyThreadDetailEvent(
         },
       };
 
+    case "thread.fleet-berth-set":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          fleetRole: event.payload.fleetRole,
+          fleetRepo: event.payload.fleetRepo,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
     case "thread.pin-reordered":
       return {
         kind: "updated",

@@ -5016,6 +5016,45 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("advertises the fleet berth set on both descriptor paths", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-environment-fleet-berth-",
+      });
+      // The descriptor the real service builds, served through both paths.
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(
+        Effect.provide(
+          ServerEnvironment.layer.pipe(
+            Layer.provide(ServerSecretStore.layer),
+            Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+          ),
+        ),
+      );
+      yield* buildAppUnderTest({
+        layers: { serverEnvironment: { getDescriptor: Effect.succeed(descriptor) } },
+      });
+
+      const wellKnown = yield* responseJsonEffect<typeof descriptor>(
+        yield* fetchEffect(yield* getHttpServerUrl("/.well-known/t3/environment")),
+      );
+      const { cookie } = yield* bootstrapBrowserSession();
+      const wsUrl = appendSessionCookieToWsUrl(
+        yield* getWsServerUrl("/ws", { authenticated: false }),
+        cookie?.split(";")[0] ?? "",
+      );
+      const config = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
+      );
+
+      assert.equal(wellKnown.capabilities.fleetThreadBerthSet, true);
+      assert.equal(config.environment.capabilities.fleetThreadBerthSet, true);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("advertises the usable file manager and its reveal label", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({

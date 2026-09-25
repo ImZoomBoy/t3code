@@ -342,6 +342,35 @@ describe("applyThreadDetailEvent", () => {
     }
   });
 
+  it("gives a fleet thread the role and repository the fleet sets", () => {
+    const updatedAt = "2026-04-01T06:00:00.000Z";
+    const result = applyThreadDetailEvent(
+      { ...baseThread, readOnly: true, fleetOwned: true, fleetRole: null, fleetRepo: null },
+      {
+        ...baseEventFields,
+        sequence: 6,
+        occurredAt: updatedAt,
+        aggregateKind: "thread",
+        aggregateId: baseThread.id,
+        type: "thread.fleet-berth-set",
+        payload: {
+          threadId: baseThread.id,
+          fleetRole: "second-mate",
+          fleetRepo: "t3code",
+          updatedAt,
+        },
+      },
+    );
+
+    expect(result.kind).toBe("updated");
+    if (result.kind === "updated") {
+      expect(result.thread.fleetRole).toBe("second-mate");
+      expect(result.thread.fleetRepo).toBe("t3code");
+      expect(result.thread.readOnly).toBe(true);
+      expect(result.thread.updatedAt).toBe(updatedAt);
+    }
+  });
+
   describe("thread.meta-updated", () => {
     it.each(["f", null] as const)(
       "updates the active key to %s without activity",
