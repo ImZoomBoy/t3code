@@ -1,5 +1,9 @@
 import type { FleetRole } from "@t3tools/contracts";
 import type { FleetThreadFields } from "@t3tools/client-runtime/fleet-threads";
+import {
+  effectiveSnoozed,
+  type ThreadSnoozeShell,
+} from "@t3tools/client-runtime/state/thread-settled";
 
 /**
  * How the sidebar arranges and colours First Mate's fleet. A worker belongs to
@@ -64,40 +68,55 @@ export interface FleetBranch<T> {
 /**
  * Pull second mates and their workers out of the thread list into a tree.
  * Branches sort by repository name and workers by launch order, never by
- * activity, so no fleet row moves when a thread gets busy. Settled and snoozed
- * fleet threads stay in the tree too. Every other thread passes through to
- * `rest` in its original order.
+ * activity, so no fleet row moves when a thread gets busy.
+ *
+ * A parked worker leaves the tree for its section, Settled or Snoozed, and
+ * comes back when un-settled or woken. A settled second mate leaves with all
+ * of its workers, and each worker lists by its own state: a settled one in
+ * Settled, a snoozed one in Snoozed, a live one in Active or Pinned. Settled
+ * rows carry Un-settle, which means nothing to a worker that is not settled.
+ * A snoozed second mate stays in the tree with its wake control.
+ *
+ * Every thread that is not in the tree passes through to `rest` in its
+ * original order.
  */
 export function buildFleetTree<T extends FleetThread>(
   threads: readonly T[],
+  options: { readonly parkedState: (thread: T) => FleetParked },
 ): { readonly branches: FleetBranch<T>[]; readonly rest: T[] } {
+  const inFleet = (thread: T) =>
+    thread.archivedAt === null &&
+    (thread.fleetRole === "second-mate" || thread.fleetRole === "worker");
+  // One second mate per repository: the newer one leads, an older one lists
+  // as an ordinary thread rather than vanishing.
+  const leads = new Map<string | null, T>();
+  for (const thread of threads) {
+    if (!inFleet(thread) || thread.fleetRole !== "second-mate") continue;
+    const repo = thread.fleetRepo ?? null;
+    const lead = leads.get(repo);
+    if (lead === undefined || thread.createdAt > lead.createdAt) leads.set(repo, thread);
+  }
+  const settledRepos = new Set(
+    [...leads].filter(([, lead]) => options.parkedState(lead) === "settled").map(([repo]) => repo),
+  );
   const byRepo = new Map<string | null, { secondMate: T | null; workers: T[] }>();
   const rest: T[] = [];
   for (const thread of threads) {
+    const repo = thread.fleetRepo ?? null;
     const inTree =
-      thread.archivedAt === null &&
-      (thread.fleetRole === "second-mate" || thread.fleetRole === "worker");
+      inFleet(thread) &&
+      !settledRepos.has(repo) &&
+      (thread.fleetRole === "worker"
+        ? options.parkedState(thread) === null
+        : leads.get(repo) === thread);
     if (!inTree) {
       rest.push(thread);
       continue;
     }
-    const repo = thread.fleetRepo ?? null;
     const branch = byRepo.get(repo) ?? { secondMate: null, workers: [] };
     byRepo.set(repo, branch);
-    if (thread.fleetRole === "worker") {
-      branch.workers.push(thread);
-    } else if (branch.secondMate === null) {
-      branch.secondMate = thread;
-    } else {
-      // One second mate per repository; the newer one leads, an older one
-      // lists as an ordinary thread rather than vanishing.
-      const [older, newer] =
-        thread.createdAt > branch.secondMate.createdAt
-          ? [branch.secondMate, thread]
-          : [thread, branch.secondMate];
-      rest.push(older);
-      branch.secondMate = newer;
-    }
+    if (thread.fleetRole === "worker") branch.workers.push(thread);
+    else branch.secondMate = thread;
   }
   const byLaunch = (left: T, right: T) =>
     left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
@@ -119,8 +138,43 @@ export function buildFleetTree<T extends FleetThread>(
 /** First Mate's own colour. Second mates take theirs from their project icon. */
 export const FIRST_MATE_TONE_CLASS = "text-pink-600 dark:text-pink-400";
 
-/** A settled or snoozed fleet thread keeps its place, drawn quietly with its way back. */
+/**
+ * Whether a thread is parked, and how. A parked thread lists in the Settled or
+ * Snoozed section; the one fleet thread parked in the tree is a snoozed second
+ * mate, drawn quietly with its wake control.
+ */
 export type FleetParked = "settled" | "snoozed" | null;
+
+/**
+ * The one rule for parking, shared by the fleet tree and the sections so the
+ * two cannot disagree. Snooze outranks settlement until the thread wakes. A
+ * server without the capability never parks a thread, because its rows would
+ * have no working way back. A drag the server has not confirmed yet wins.
+ */
+export function resolveParkedState(
+  thread: ThreadSnoozeShell & { readonly settledOverride?: string | null | undefined },
+  options: {
+    readonly supportsSnooze: boolean;
+    readonly supportsSettlement: boolean;
+    readonly now: string;
+    readonly droppedInto?: "pinned" | "active" | "settled" | undefined;
+  },
+): FleetParked {
+  if (options.droppedInto !== undefined) {
+    return options.droppedInto === "settled" ? "settled" : null;
+  }
+  if (options.supportsSnooze && effectiveSnoozed(thread, { now: options.now })) return "snoozed";
+  if (options.supportsSettlement && thread.settledOverride === "settled") return "settled";
+  return null;
+}
+
+/** The section a thread outside the fleet tree lists in. */
+export function sidebarSectionFor(
+  thread: { readonly pinnedAt?: string | null | undefined },
+  parked: FleetParked,
+): "snoozed" | "settled" | "pinned" | "active" {
+  return parked ?? (thread.pinnedAt != null ? "pinned" : "active");
+}
 
 /** One row of the fleet tree, in display order. */
 export interface FleetRow<T> {
@@ -142,7 +196,7 @@ export interface FleetRow<T> {
 
 /**
  * The fleet tree as rows: each second mate, then its workers indented under it
- * unless folded. Parked threads stay in their place.
+ * unless folded. A snoozed second mate is drawn parked in its place.
  */
 export function buildFleetRows<T extends FleetThread>(
   branches: readonly FleetBranch<T>[],

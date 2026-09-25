@@ -167,6 +167,8 @@ import {
   FIRST_MATE_TONE_CLASS,
   FLEET_ROLE_WORDS,
   type FleetParked,
+  resolveParkedState,
+  sidebarSectionFor,
 } from "./sidebar/fleetSidebar.logic";
 import { FleetTone, type FleetTheme } from "./sidebar/FleetTone";
 import { resolveReadOnlyThreadModel } from "./chat/readOnlyThreadModel.logic";
@@ -1591,7 +1593,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const roleBadge = roleLabel ? (
     <span
       data-testid={`sidebar-fleet-role-${thread.id}`}
-      className="min-w-0 truncate text-xs text-muted-foreground/70"
+      className={cn(
+        "text-xs text-muted-foreground/70",
+        // A compact row has room for the whole word; a card row lets it give way.
+        variant === "slim" ? "shrink-0" : "min-w-0 truncate",
+      )}
     >
       {roleLabel}
     </span>
@@ -1771,7 +1777,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
-            {readOnlyModelBadges}
+            {/* A compact row leaves the model and thinking level to the hover
+              card, so the title always has room. */}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -2823,23 +2830,30 @@ export default function Sidebar() {
         (scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
-    // Second mates and their workers leave the sections for the fleet tree,
-    // settled and snoozed ones included: they park in place.
-    const fleetTree = buildFleetTree(inScope);
+    // One parking rule for the fleet tree and the sections below. A drag the
+    // server has not confirmed yet counts as landed, so a worker dragged out
+    // of Settled goes straight back to the tree rather than via Active.
+    const parkedStateOf = (thread: EnvironmentThreadShell): FleetParked => {
+      const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      return resolveParkedState(thread, {
+        supportsSnooze: capabilities?.threadSnooze === true,
+        supportsSettlement: capabilities?.threadSettlement === true,
+        now: preciseNow,
+        droppedInto: optimisticDrop?.key === threadKey ? optimisticDrop.section : undefined,
+      });
+    };
+    // Second mates and their workers leave the sections for the fleet tree.
+    // A parked worker, or a settled second mate with its workers, lists in the
+    // sections instead.
+    const fleetTree = buildFleetTree(inScope, { parkedState: parkedStateOf });
     const parked = new Map<EnvironmentThreadShell, FleetParked>();
     for (const branch of fleetTree.branches) {
       for (const thread of branch.secondMate
         ? [branch.secondMate, ...branch.workers]
         : branch.workers) {
-        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-        if (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow })) {
-          parked.set(thread, "snoozed");
-        } else if (
-          capabilities?.threadSettlement === true &&
-          thread.settledOverride === "settled"
-        ) {
-          parked.set(thread, "settled");
-        }
+        const state = parkedStateOf(thread);
+        if (state !== null) parked.set(thread, state);
       }
     }
     const visible = fleetTree.rest;
@@ -2851,12 +2865,6 @@ export default function Sidebar() {
     const activeReorderable = new Set<string>();
     for (const thread of visible) {
       const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-      // Threads on servers without the settlement capability (old server,
-      // or descriptor not loaded yet) never classify as settled: the user
-      // could neither un-settle nor pin them, so auto-settling them would
-      // strand rows in a tail with no working affordances.
-      const supportsSettlement = capabilities?.threadSettlement === true;
-      const supportsSnooze = capabilities?.threadSnooze === true;
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
       if (capabilities?.threadActiveReorder === true) activeReorderable.add(threadKey);
       // Older servers retain their existing drag actions. Active placement
@@ -2881,16 +2889,22 @@ export default function Sidebar() {
             ? projected
             : { ...projected, snoozedAt: thread.snoozedAt, snoozedUntil: thread.snoozedUntil },
         );
-      } else if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
-        // Snooze outranks settlement and pinning until the thread wakes.
-        snoozed.push(thread);
-      } else if (supportsSettlement && thread.settledOverride === "settled") {
-        settled.push(thread);
-      } else if (thread.pinnedAt != null) {
-        pinned.push(thread);
-      } else {
-        active.push(thread);
+        continue;
       }
+      // Threads on servers without the settlement capability (old server, or
+      // descriptor not loaded yet) never park: the user could neither
+      // un-settle nor pin them, so parking them would strand rows in a tail
+      // with no working affordances. Snooze outranks settlement and pinning
+      // until the thread wakes.
+      const section = sidebarSectionFor(thread, parkedStateOf(thread));
+      (section === "snoozed"
+        ? snoozed
+        : section === "settled"
+          ? settled
+          : section === "pinned"
+            ? pinned
+            : active
+      ).push(thread);
     }
     // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
     // user-arranged keys first, keyless threads in creation order below.
@@ -2971,6 +2985,18 @@ export default function Sidebar() {
     [fleetBranches, fleetParked, foldedFleetRepos, projectByKey, toggleFleetRepo],
   );
   const fleetThreads = useMemo(() => fleetRows.map((row) => row.thread), [fleetRows]);
+  // Every thread in the fleet tree, folded ones included.
+  const fleetTreeThreadKeys = useMemo(
+    () =>
+      new Set(
+        fleetBranches.flatMap((branch) =>
+          (branch.secondMate ? [branch.secondMate, ...branch.workers] : branch.workers).map(
+            (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ),
+        ),
+      ),
+    [fleetBranches],
+  );
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3640,6 +3666,12 @@ export default function Sidebar() {
     }
     if (canonicalSection !== optimisticDrop.section) return;
     if (optimisticDrop.clearsSnooze && thread.snoozedUntil != null) return;
+    // A thread that lands in the fleet tree never joins the destination list,
+    // so the confirmed move above is all there is to wait for.
+    if (fleetTreeThreadKeys.has(optimisticDrop.key)) {
+      setOptimisticDrop(null);
+      return;
+    }
     const destinationKeys = optimisticDrop.section === "pinned" ? pinnedKeys : activeKeys;
     const canonicalDestination = destinationKeys.flatMap((key) => {
       const canonical = canonicalByKey.get(key);
@@ -3667,7 +3699,7 @@ export default function Sidebar() {
     if (membershipChanged || foreignKeyLanded || allAssignmentsLanded) {
       setOptimisticDrop(null);
     }
-  }, [activeKeys, optimisticDrop, pinnedKeys, threads]);
+  }, [activeKeys, fleetTreeThreadKeys, optimisticDrop, pinnedKeys, threads]);
   const attemptPin = useCallback(
     (threadRef: ScopedThreadRef) => {
       void (async () => {
