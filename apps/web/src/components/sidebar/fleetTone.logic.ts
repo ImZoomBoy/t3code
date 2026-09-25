@@ -82,7 +82,7 @@ function oklabAB(red: number, green: number, blue: number) {
  * area, weighted by how strong the colour is. Null when the image has no
  * real colour.
  */
-export function mainColorOfPixels(
+function mainColorOfPixels(
   pixels: ArrayLike<number>,
 ): { readonly hue: number; readonly chroma: number } | null {
   const bins = Array.from({ length: HUE_BINS }, () => ({ weight: 0, a: 0, b: 0, count: 0 }));
