@@ -1,6 +1,6 @@
 /**
  * The folder a new First Mate thread runs in. The setting starts empty, so
- * the first "New First Mate" asks for the folder with the app's folder picker
+ * the first "Start First Mate" asks for the folder with the app's folder picker
  * and saves the answer; every later start uses the saved folder. Null means
  * the user cancelled the picker.
  */

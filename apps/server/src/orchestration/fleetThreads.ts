@@ -28,6 +28,45 @@ export function readOnlyClearRefusal(
 }
 
 /**
+ * The repository the fleet may record on this thread with
+ * `thread.fleet-berth.set`, or why it may not.
+ *
+ * The command repairs a thread the fleet created before it sent `fleetRole`.
+ * It never makes or unmakes the First Mate thread: only `thread.create` does
+ * that, so the one-live-First-Mate rule holds in one place. A thread the fleet
+ * did not create is not the fleet's to label.
+ */
+export function resolveFleetBerth(
+  thread: Pick<OrchestrationThread, "id" | "fleetOwned" | "fleetRole">,
+  command: Pick<
+    Extract<OrchestrationCommand, { type: "thread.fleet-berth.set" }>,
+    "issuer" | "fleetRole" | "fleetRepo"
+  >,
+): { readonly fleetRepo: string } | { readonly refusal: string } {
+  if (command.issuer !== "fleet") {
+    return { refusal: `Only the fleet may set the berth of thread '${thread.id}'.` };
+  }
+  if (isFirstMateThread(command)) {
+    return {
+      refusal: `The First Mate thread is only made by thread.create, so thread '${thread.id}' cannot become one.`,
+    };
+  }
+  if (thread.fleetOwned !== true) {
+    return { refusal: `Thread '${thread.id}' is not fleet-owned, so its berth stays as it is.` };
+  }
+  if (isFirstMateThread(thread)) {
+    return {
+      refusal: `Thread '${thread.id}' is the First Mate thread, so its berth stays as it is.`,
+    };
+  }
+  const fleetRepo = resolveFleetRepo(command);
+  if (fleetRepo === null) {
+    return { refusal: `Setting the berth of thread '${thread.id}' needs a repository.` };
+  }
+  return { fleetRepo };
+}
+
+/**
  * The repository a new fleet thread records. The First Mate thread works for
  * no one repository, whatever it was sent, and a blank name means none.
  */

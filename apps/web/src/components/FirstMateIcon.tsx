@@ -1,14 +1,15 @@
-import { ShipWheelIcon, type LucideProps } from "lucide-react";
+import { ShipIcon, type LucideProps } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import { FIRST_MATE_TONE_CLASS } from "./sidebar/fleetSidebar.logic";
 
-/** First Mate's mark: a pink ship's wheel, shown wherever other rows show a project. */
+/** First Mate's mark: a ship in First Mate's colour. */
 export function FirstMateIcon({ className, ...props }: LucideProps) {
   return (
-    <ShipWheelIcon
+    <ShipIcon
       aria-hidden
       {...props}
-      className={cn("size-4 shrink-0 text-pink-500 dark:text-pink-400", className)}
+      className={cn("size-4 shrink-0", FIRST_MATE_TONE_CLASS, className)}
     />
   );
 }

@@ -8,7 +8,7 @@ describe("resolveForkBuildIdentity", () => {
       appId: FORK_APP_ID,
       appBaseName: "T3 Code Fork",
       tagLabel: "FORK",
-      badgeLabel: "AP",
+      badgeLabel: "SI",
     });
   });
 

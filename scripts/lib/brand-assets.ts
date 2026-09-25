@@ -23,8 +23,8 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
 
-  // Fork artwork (#59): upstream's black plate, tinted and badged so this build
-  // is distinguishable in the taskbar. Regenerate with
+  // Fork artwork (#59): the sidebar header's icon, so this build is
+  // distinguishable in the taskbar. Regenerate with
   // `node scripts/generate-fork-icons.ts`.
   forkMacIconPng: "assets/fork/fork-macos-1024.png",
   forkLinuxIconPng: "assets/fork/fork-universal-1024.png",

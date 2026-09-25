@@ -75,8 +75,8 @@ convenience of a shared thread list on day one. So the fork now gets its own ide
   (`t3code-fork://` / `t3code-fork-dev://`, see `apps/desktop/src/electron/ElectronProtocol.ts`) are all
   distinct from the official build's. Two different OS-level protocol handlers can't fight over the same
   scheme.
-- **Visibly different once open.** The app icon is upstream's plate tinted orange with an "AP" corner
-  badge, the window title reads `T3 Code Fork (Alpha)`, and the sidebar wordmark carries a small `FORK`
+- **Visibly different once open.** The app icon is an orange T3 tile with an "SI" corner badge, the same
+  icon the sidebar header shows, the window title reads `T3 Code Fork (Alpha)`, and the sidebar wordmark carries a small `FORK`
   tag, so the taskbar, Alt-Tab and the open window all say which build you are in
   ([#59](https://github.com/autoprintworks/t3code/issues/59)).
 - **Different database, by default.** T3 Code's state directory (threads, projects, settings — the
@@ -133,19 +133,15 @@ Icons are generated, not hand-drawn per size:
 node scripts/generate-fork-icons.ts
 ```
 
-That tints upstream's 1024px masters in `assets/prod/`, composites the badge, and writes every size the
-packagers need to `assets/fork/` and `apps/desktop/resources/`: the Windows `.ico`, the web favicons and
-apple touch icon, and — from upstream's macOS master, which keeps Apple's grid padding — `icon.icns` and
-the 512px dock icon. All outputs are committed. Re-run it after upstream changes its artwork.
+That rasterises the icon geometry in `packages/shared/src/forkAppIcon.ts`, the same shapes the sidebar
+header renders as SVG, and writes every size to `assets/fork/`: the Windows `.ico` (16 to 256px), the
+web favicons and apple touch icon, the 1024px master Linux reads, and a macOS master inset to Apple's
+icon grid. The desktop build turns the masters into `icon.icns` and the Linux sizes at package time.
+Below 48px the badge letters cannot resolve, so those sizes draw a plain badge. Re-run it after
+changing the badge label in `packages/shared/src/forkBuild.ts` or the geometry.
 
 `scripts/generate-fork-icons.test.ts` re-runs the generator and compares it against the committed bytes,
 so an edited generator or a hand-edited asset fails the suite instead of shipping.
-
-Before and after, on the Windows taskbar:
-
-| Before                                                           | After                                                                    |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| ![Upstream's black plate](./images/fork-icon-taskbar-before.png) | ![The fork's tinted, badged plate](./images/fork-icon-taskbar-after.png) |
 
 ## Unsigned installer cost
 

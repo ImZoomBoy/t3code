@@ -2402,7 +2402,7 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("first-mate-working-directory")}
-          description="Where a new First Mate thread runs. First Mate loads its instructions from this folder. If it is empty, New First Mate asks for it once."
+          description="Where a new First Mate thread runs. First Mate loads its instructions from this folder. If it is empty, Start First Mate asks for it once."
           resetAction={
             settings.firstMateWorkingDirectory !==
             DEFAULT_UNIFIED_SETTINGS.firstMateWorkingDirectory ? (

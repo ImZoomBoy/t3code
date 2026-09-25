@@ -27,6 +27,10 @@
       "types": "./src/forkBuild.ts",
       "import": "./src/forkBuild.ts"
     },
+    "./forkAppIcon": {
+      "types": "./src/forkAppIcon.ts",
+      "import": "./src/forkAppIcon.ts"
+    },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"

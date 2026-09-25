@@ -814,6 +814,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.fleet-berth-set": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            fleetRole: event.payload.fleetRole,
+            fleetRepo: event.payload.fleetRepo,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.unpinned": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,

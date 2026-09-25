@@ -172,8 +172,12 @@ export const normalizeDispatchCommand = (
       return { ...canonicalCommand, issuer } satisfies OrchestrationCommand;
     }
 
-    // Unstamped, the decider refuses it: only the fleet may clear read-only.
-    if (canonicalCommand.type === "thread.read-only.clear") {
+    // Unstamped, the decider refuses it: only the fleet may clear read-only
+    // or set a thread's berth.
+    if (
+      canonicalCommand.type === "thread.read-only.clear" ||
+      canonicalCommand.type === "thread.fleet-berth.set"
+    ) {
       return (
         issuer === "fleet" ? { ...canonicalCommand, issuer } : canonicalCommand
       ) satisfies OrchestrationCommand;

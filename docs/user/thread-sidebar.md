@@ -86,16 +86,22 @@ their default order until the server is updated.
 
 ## First Mate threads
 
-On web and desktop, the First Mate thread sits in its own slot at the top of the sidebar,
-outside every project, with a pink ship's wheel. It stays pinned there and never settles
-automatically, even when a pull request linked to it merges. Second mate and worker threads
-sit with their project and carry a **Second mate** or **Worker** label.
+On web and desktop, the sidebar keeps First Mate's fleet together above your other threads, and
+each fleet thread is labelled **First Mate**, **Second mate** or **Worker**.
 
-When no First Mate thread is live, for example after you archive it, choose **New First Mate**
-at the top of the sidebar to start one. It runs in the folder set in **Settings → General →
-First Mate working directory**. The first time, the desktop app asks you to choose that folder
-and saves it. A new First Mate runs on Claude Opus 5.5 with the 1M context at medium effort.
-Only one First Mate thread can be live at a time.
+- **First Mate** always stays at the top. It never settles automatically, even when a pull
+  request linked to it merges. If you have First Mate threads in more than one environment, pin
+  the one you want on top. The others list under it.
+- **Second mates** follow, one per repository, in repository-name order. Each keeps its place
+  whatever it is doing.
+- **Workers** sit under the second mate for their repository, including workers you settle or
+  snooze. You can hide a second mate's workers and show them again.
+
+When no First Mate thread is live, for example after you archive it, choose **Start First Mate**
+at the top of the sidebar. It runs in the folder set in **Settings → General → First Mate working
+directory**. The first time, the desktop app asks you to choose that folder and saves it. A new
+First Mate runs on Claude Opus 5.5 with the 1M context at medium effort. Each environment can have
+one live First Mate thread at a time.
 
 ## Settle finished work
 
