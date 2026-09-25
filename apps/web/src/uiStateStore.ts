@@ -21,6 +21,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 
 export interface PersistedUiState {
   projectExpandedById?: Record<string, boolean>;
+  fleetRepoExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
   collapsedProjectCwds?: string[];
@@ -35,6 +36,9 @@ export interface PersistedUiState {
 
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
+  // Whether each second mate in the fleet tree shows its workers, by fleet
+  // repository. A repository with no entry shows them.
+  fleetRepoExpandedById: Record<string, boolean>;
   projectOrder: string[];
   // Logical project key the sidebar list is scoped to, or null for "all
   // projects". Lives here so routes that unmount the sidebar (Settings)
@@ -60,6 +64,7 @@ export interface UiState
 
 const initialState: UiState = {
   projectExpandedById: {},
+  fleetRepoExpandedById: {},
   projectOrder: [],
   sidebarProjectScopeKey: null,
   threadLastVisitedAtById: {},
@@ -147,6 +152,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
 
   return {
     projectExpandedById,
+    fleetRepoExpandedById: sanitizeBooleanRecord(parsed.fleetRepoExpandedById),
     projectOrder,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
     threadChangedFilesExpandedById:
@@ -225,6 +231,7 @@ export function persistState(state: UiState): void {
       PERSISTED_STATE_KEY,
       JSON.stringify({
         projectExpandedById,
+        fleetRepoExpandedById: state.fleetRepoExpandedById,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
@@ -379,6 +386,16 @@ export function setProjectExpanded(
   };
 }
 
+export function setFleetRepoExpanded(state: UiState, repo: string, expanded: boolean): UiState {
+  if ((state.fleetRepoExpandedById[repo] ?? true) === expanded) {
+    return state;
+  }
+  return {
+    ...state,
+    fleetRepoExpandedById: { ...state.fleetRepoExpandedById, [repo]: expanded },
+  };
+}
+
 export function reorderProjects(
   state: UiState,
   currentProjectOrder: readonly string[],
@@ -431,6 +448,7 @@ interface UiStateStore extends UiState {
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
+  setFleetRepoExpanded: (repo: string, expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
     draggedProjectIds: readonly string[],
@@ -453,6 +471,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
+  setFleetRepoExpanded: (repo, expanded) =>
+    set((state) => setFleetRepoExpanded(state, repo, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
@@ -460,6 +480,10 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
+
+export function resetUiStateForTests(): void {
+  useUiStateStore.setState(initialState);
+}
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("beforeunload", () => {

@@ -21,6 +21,7 @@ import {
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
+    fleetRepoExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
     threadLastVisitedAtById: {},
@@ -196,6 +197,7 @@ describe("parsePersistedState", () => {
       projectExpandedById: {
         logical: false,
       },
+      fleetRepoExpandedById: {},
       projectOrder: ["physical-b", "physical-a"],
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
@@ -318,6 +320,7 @@ describe("uiStateStore persistence", () => {
       projectExpandedById: {
         logical: false,
       },
+      fleetRepoExpandedById: {},
       projectOrder: ["physical-b", "physical-a"],
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
@@ -348,6 +351,17 @@ describe("uiStateStore persistence", () => {
     expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
       "github.com/pingdotgg/t3code",
     );
+  });
+
+  it("restores folded second mates across reloads", () => {
+    persistState(makeUiState({ fleetRepoExpandedById: { firstmate: false } }));
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(parsePersistedState(persisted).fleetRepoExpandedById).toEqual({ firstmate: false });
+    expect(parsePersistedState({}).fleetRepoExpandedById).toEqual({});
   });
 
   it("drops the temporary expanded-only migration fallback when rewriting state", () => {
