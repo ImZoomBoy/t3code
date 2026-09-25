@@ -10,6 +10,12 @@ import * as Arr from "effect/Array";
 import { shallow } from "zustand/vanilla/shallow";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
+  mergeStoppedBackgroundCommands,
+  readStoppedBackgroundCommand,
+  stoppedBackgroundCommandsLabel,
+  type StoppedBackgroundCommand,
+} from "@t3tools/client-runtime/work-log/background-commands";
+import {
   commandDetailRepeatsCommand,
   extractCommandOutputText,
   extractWorkLogToolLifecycleStatus,
@@ -104,6 +110,8 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   isWorkflowCoordinator?: boolean;
   /** Shell/monitor/plan tasks: ordinary work-log rows, never spawn CTAs. */
   isBackgroundTask?: boolean;
+  /** Stopped background commands this row stands for; adjacent ones share a row. */
+  stoppedBackgroundCommands?: ReadonlyArray<StoppedBackgroundCommand>;
 }
 
 const derivedWorkLogEntryByActivity = new WeakMap<
@@ -672,6 +680,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (isTaskActivity && payload && isBackgroundTaskActivity(payload)) {
     entry.isBackgroundTask = true;
   }
+  const stoppedBackgroundCommand = readStoppedBackgroundCommand(activity);
+  if (stoppedBackgroundCommand) {
+    // The provider's stop summary is noise; the label names the command.
+    entry.stoppedBackgroundCommands = [stoppedBackgroundCommand];
+    entry.label = stoppedBackgroundCommandsLabel(entry.stoppedBackgroundCommands);
+    delete entry.detail;
+    delete entry.toolTitle;
+  }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
     entry[workLogCollapseKey] = collapseKey;
@@ -775,6 +791,23 @@ function collapseDerivedWorkLogEntries(
         ...entry,
         agentSpawn: { workflowId, agentTaskIds: [entry.taskId] },
       });
+      continue;
+    }
+    const previousEntry = collapsed.at(-1);
+    if (
+      entry.stoppedBackgroundCommands &&
+      previousEntry?.stoppedBackgroundCommands &&
+      (previousEntry.turnId ?? null) === (entry.turnId ?? null)
+    ) {
+      const stoppedBackgroundCommands = mergeStoppedBackgroundCommands(
+        previousEntry.stoppedBackgroundCommands,
+        entry.stoppedBackgroundCommands,
+      );
+      collapsed[collapsed.length - 1] = {
+        ...previousEntry,
+        stoppedBackgroundCommands,
+        label: stoppedBackgroundCommandsLabel(stoppedBackgroundCommands),
+      };
       continue;
     }
     const lifecycleKey = toolLifecycleCollapseMapKey(entry);

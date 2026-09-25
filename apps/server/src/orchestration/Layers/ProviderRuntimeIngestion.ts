@@ -100,6 +100,22 @@ function findTaskTitleInActivities(
   return undefined;
 }
 
+// The classification inputs (see classifyTaskAgentKind) from a task's saved
+// row, for a terminal event that arrived without them.
+function findTaskClassInActivities(
+  activities: ReadonlyArray<{ readonly payload: unknown }> | undefined,
+): { taskType?: string; agentId?: string } {
+  const payload = activities?.[0]?.payload;
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+  const { taskType, agentId } = payload as { taskType?: unknown; agentId?: unknown };
+  return {
+    ...(typeof taskType === "string" ? { taskType } : {}),
+    ...(typeof agentId === "string" ? { agentId } : {}),
+  };
+}
+
 interface AssistantSegmentState {
   baseKey: string;
   nextSegmentIndex: number;
@@ -2509,24 +2525,30 @@ const make = Effect.gen(function* () {
       }
 
       let taskTitle: string | undefined;
+      let activityEvent = event;
       if (event.type === "task.completed") {
         taskTitle = yield* lookupTaskDescription(thread.id, event.payload.taskId);
-        if (!taskTitle) {
+        // A resumed Claude session reports the previous process's unfinished
+        // tasks with no task type, so their saved start row supplies it.
+        if (!taskTitle || event.payload.taskType === undefined) {
           const taskActivity = yield* projectionThreadActivityRepository.getLatestTaskActivity({
             threadId: thread.id,
             taskId: event.payload.taskId,
           });
-          taskTitle = findTaskTitleInActivities(
-            Option.match(taskActivity, {
-              onNone: () => undefined,
-              onSome: (activity) => [activity],
-            }),
-            event.payload.taskId,
-          );
+          const savedActivities = Option.match(taskActivity, {
+            onNone: () => undefined,
+            onSome: (activity) => [activity],
+          });
+          taskTitle ??= findTaskTitleInActivities(savedActivities, event.payload.taskId);
+          if (event.payload.taskType === undefined) {
+            activityEvent = {
+              ...event,
+              payload: { ...event.payload, ...findTaskClassInActivities(savedActivities) },
+            };
+          }
         }
       }
 
-      let activityEvent = event;
       if (
         isCompactedThreadState &&
         event.requestId === undefined &&

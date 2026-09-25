@@ -342,6 +342,44 @@
       "patchesUpstream": true
     },
     {
+      "name": "stopped-background-command-rows",
+      "description": "A resumed Claude session reports the previous process's unfinished background shells and monitors as stopped tasks with no task type. Ingestion recovers the type and owning agent from the task's saved start row, so they are no longer stamped as subagents. Web and mobile label a stopped background command with its description and fold several that stopped together into one row. backgroundCommands.ts is the fork's own module and upstream has no file at that path.",
+      "keep": "The taskType and agentId recovery from the saved task row (findTaskClassInActivities and its call in the task.completed branch) survives in ProviderRuntimeIngestion.ts, and its test survives in ProviderRuntimeIngestion.test.ts. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts",
+      "testName": "classifies a resumed session",
+      "patchesUpstream": true
+    },
+    {
+      "name": "stopped-background-command-rows-web",
+      "description": "The web half of stopped-background-command-rows: the row label and the fold of adjacent stopped background commands.",
+      "keep": "backgroundCommands.ts is ours whole, and so is its ./work-log/background-commands export in packages/client-runtime/package.json. In session-logic.ts the background-commands import, the stoppedBackgroundCommands field, its label in toDerivedWorkLogEntry and its fold in collapseDerivedWorkLogEntries survive, and the \"stopped background commands\" describe block survives in session-logic.test.ts. Everything else in those files takes upstream.",
+      "files": [
+        "packages/client-runtime/src/work-log/backgroundCommands.ts",
+        "packages/client-runtime/package.json",
+        "apps/web/src/session-logic.ts",
+        "apps/web/src/session-logic.test.ts"
+      ],
+      "test": "apps/web/src/session-logic.test.ts",
+      "testName": "stopped background commands",
+      "patchesUpstream": true
+    },
+    {
+      "name": "stopped-background-command-rows-mobile",
+      "description": "The mobile half of stopped-background-command-rows, on the same shared module as web.",
+      "keep": "In threadActivity.ts the background-commands import, the stoppedBackgroundCommands field, its label in toDerivedWorkLogEntry and its fold in collapseDerivedWorkLogEntries survive, and the \"stopped background commands\" describe block survives in threadActivity.test.ts. Everything else in those files takes upstream.",
+      "files": [
+        "apps/mobile/src/lib/threadActivity.ts",
+        "apps/mobile/src/lib/threadActivity.test.ts"
+      ],
+      "test": "apps/mobile/src/lib/threadActivity.test.ts",
+      "testName": "stopped background commands",
+      "patchesUpstream": true
+    },
+    {
       "name": "fork-app-icon",
       "description": "The fork's app icon: an orange T3 tile with a navy corner badge carrying the badge label from forkBuild.ts. forkAppIcon.ts holds its geometry once; the sidebar header renders it as SVG and scripts/generate-fork-icons.ts rasterises it into every icon file the desktop and web builds ship, so the taskbar icon and the header icon match. forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and assets/fork/ are the fork's own and upstream has none of them, so the tests cannot pass on plain upstream. Issues #59 and #154.",
       "keep": "forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and every file in assets/fork/ are ours whole. The ./forkAppIcon export survives in packages/shared/package.json, the fork* icon paths and the fork web brand survive in brand-assets.ts, and SidebarChrome.tsx still shows ForkAppIcon in the sidebar header. Everything else in those three files takes upstream. After any merge, run node scripts/generate-fork-icons.ts; the generator test fails if the committed icons drift from it.",
