@@ -2587,7 +2587,7 @@ describe("partitionFirstMateThreads", () => {
       readonly fleetRepo?: string | null;
       readonly archivedAt?: string | null;
     } = {},
-  ) => ({ id, archivedAt: null, ...fleet });
+  ) => ({ id, archivedAt: null, createdAt: "2026-09-24T00:00:00Z", pinnedAt: null, ...fleet });
 
   it("puts the live First Mate in its own slot, outside every section", () => {
     const firstMate = thread("fm", { fleetRole: "first-mate", fleetRepo: null });
@@ -2596,7 +2596,7 @@ describe("partitionFirstMateThreads", () => {
     const plain = thread("plain");
     const { slot, rest } = partitionFirstMateThreads([secondMate, firstMate, worker, plain]);
     expect(slot).toEqual([firstMate]);
-    // Second mates and workers stay with ordinary threads, under their project.
+    // Second mates and workers pass on for the fleet tree to place.
     expect(rest).toEqual([secondMate, worker, plain]);
   });
 
