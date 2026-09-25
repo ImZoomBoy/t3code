@@ -4970,6 +4970,92 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completed?.payload).toMatchObject({ title: "Watch round-3 CI and bots" });
   });
 
+  it("classifies a resumed session's stopped tasks from their saved start rows", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-before-resume");
+    const provider = ProviderDriverKind.make("claudeAgent");
+
+    await harness.emitAndDrain([
+      {
+        type: "task.started",
+        eventId: asEventId("evt-orphan-monitor-started"),
+        provider,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId,
+        turnId,
+        payload: {
+          taskId: "b-orphan-monitor",
+          description: "New reports from the second mates",
+          taskType: "local_bash",
+          toolUseId: "toolu_monitor",
+        },
+      },
+      {
+        type: "task.started",
+        eventId: asEventId("evt-orphan-agent-started"),
+        provider,
+        createdAt: "2026-01-01T00:00:01.000Z",
+        threadId,
+        turnId,
+        payload: {
+          taskId: "a-orphan-agent",
+          description: "Review the diff",
+          taskType: "local_agent",
+          toolUseId: "toolu_agent",
+        },
+      },
+      // The Claude process exits; the resumed one has never seen these tasks.
+      {
+        type: "session.exited",
+        eventId: asEventId("evt-orphan-session-exited"),
+        provider,
+        createdAt: "2026-01-01T00:00:02.000Z",
+        threadId,
+        payload: {},
+      },
+      // A resumed session reports each unfinished task with no task type.
+      {
+        type: "task.completed",
+        eventId: asEventId("evt-orphan-monitor-stopped"),
+        provider,
+        createdAt: "2026-01-01T00:00:03.000Z",
+        threadId,
+        payload: {
+          taskId: "b-orphan-monitor",
+          status: "stopped",
+          summary: "Orphaned by a previous Claude Code process exit.",
+        },
+      },
+      {
+        type: "task.completed",
+        eventId: asEventId("evt-orphan-agent-stopped"),
+        provider,
+        createdAt: "2026-01-01T00:00:03.000Z",
+        threadId,
+        payload: {
+          taskId: "a-orphan-agent",
+          status: "stopped",
+          summary: "Orphaned by a previous Claude Code process exit.",
+        },
+      },
+    ]);
+
+    const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+    const payloadOf = (id: string) =>
+      thread?.activities.find((activity) => activity.id === id)?.payload;
+    expect(payloadOf("evt-orphan-monitor-stopped")).toMatchObject({
+      agentKind: "background",
+      taskType: "local_bash",
+      title: "New reports from the second mates",
+    });
+    expect(payloadOf("evt-orphan-agent-stopped")).toMatchObject({
+      agentKind: "agent",
+      taskType: "local_agent",
+      title: "Review the diff",
+    });
+  });
+
   it("projects structured user input request and resolution as thread activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

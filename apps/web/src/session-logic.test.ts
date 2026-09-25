@@ -2497,3 +2497,69 @@ describe("session activity performance", () => {
     });
   });
 });
+
+describe("stopped background commands", () => {
+  const orphanSummary = "Orphaned by a previous Claude Code process exit.";
+  const stoppedTask = (taskId: string, taskType: string, title: string, sequence: number) =>
+    makeActivity({
+      id: `stopped-${taskId}`,
+      kind: "task.completed",
+      summary: "Task stopped",
+      tone: "info",
+      sequence,
+      payload: { taskId, taskType, title, status: "stopped", summary: orphanSummary },
+    });
+
+  it("labels a stopped background command with its description", () => {
+    const entries = deriveWorkLogEntries([stoppedTask("b1", "local_bash", "Watch CI", 1)]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.agentSpawn).toBeUndefined();
+    expect(entries[0]!.label).toBe("Background command stopped: Watch CI");
+    expect(entries[0]!.detail).toBeUndefined();
+    expect(entries[0]!.toolTitle).toBeUndefined();
+  });
+
+  it("folds commands that stopped together into one row", () => {
+    const entries = deriveWorkLogEntries([
+      stoppedTask("b1", "local_bash", "New reports", 1),
+      stoppedTask("b2", "local_bash", "Worker reports or dies", 2),
+      stoppedTask("b3", "local_bash", "New reports", 3),
+      makeActivity({ id: "curl", kind: "tool.completed", summary: "Ran curl", sequence: 4 }),
+      stoppedTask("b4", "monitor", "Tail logs", 5),
+    ]);
+    expect(entries.map((entry) => entry.label)).toEqual([
+      "3 background commands stopped: New reports; Worker reports or dies",
+      "Ran curl",
+      "Background command stopped: Tail logs",
+    ]);
+    expect(entries[0]!.id).toBe("stopped-b1");
+  });
+
+  it("keeps a stopped Agent tool run as a subagent row", () => {
+    const entries = deriveWorkLogEntries([
+      stoppedTask("b1", "local_bash", "Watch CI", 1),
+      stoppedTask("a1", "local_agent", "Review the diff", 2),
+    ]);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.label).toBe("Background command stopped: Watch CI");
+    expect(entries[1]!.agentSpawn).toEqual({ workflowId: null, agentTaskIds: ["a1"] });
+  });
+
+  it("keeps the provider summary for a background command that completed", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        kind: "task.completed",
+        summary: "Task completed",
+        tone: "info",
+        payload: {
+          taskId: "b1",
+          taskType: "local_bash",
+          title: "Watch CI",
+          status: "completed",
+          summary: 'Background command "Watch CI" completed (exit code 0)',
+        },
+      }),
+    ]);
+    expect(entries[0]!.label).toBe('Background command "Watch CI" completed (exit code 0)');
+  });
+});

@@ -35,6 +35,12 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
+import {
+  mergeStoppedBackgroundCommands,
+  readStoppedBackgroundCommand,
+  stoppedBackgroundCommandsLabel,
+  type StoppedBackgroundCommand,
+} from "@t3tools/client-runtime/work-log/background-commands";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -131,6 +137,8 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   isWorkflowCoordinator?: boolean;
   /** Shell/monitor/plan tasks: ordinary work-log rows, never spawn batches. */
   isBackgroundTask?: boolean;
+  /** Stopped background commands this row stands for; adjacent ones share a row. */
+  stoppedBackgroundCommands?: ReadonlyArray<StoppedBackgroundCommand>;
 }
 
 type RawThreadFeedEntry =
@@ -626,6 +634,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
   }
+  const stoppedBackgroundCommand = readStoppedBackgroundCommand(activity);
+  if (stoppedBackgroundCommand) {
+    // The provider's stop summary is noise; the label names the command.
+    entry.stoppedBackgroundCommands = [stoppedBackgroundCommand];
+    entry.label = stoppedBackgroundCommandsLabel(entry.stoppedBackgroundCommands);
+    delete entry.detail;
+    delete entry.toolTitle;
+  }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
     entry.collapseKey = collapseKey;
@@ -765,6 +781,24 @@ function collapseDerivedWorkLogEntries(
         const existingIndex = taskRowIndex.get(entry.taskId);
         if (existingIndex !== undefined) {
           collapsed[existingIndex] = mergeDerivedWorkLogEntries(collapsed[existingIndex]!, entry);
+          continue;
+        }
+        const previous = collapsed.at(-1);
+        if (
+          entry.stoppedBackgroundCommands &&
+          previous?.stoppedBackgroundCommands &&
+          previous.turnId === entry.turnId
+        ) {
+          const stoppedBackgroundCommands = mergeStoppedBackgroundCommands(
+            previous.stoppedBackgroundCommands,
+            entry.stoppedBackgroundCommands,
+          );
+          collapsed[collapsed.length - 1] = {
+            ...previous,
+            stoppedBackgroundCommands,
+            label: stoppedBackgroundCommandsLabel(stoppedBackgroundCommands),
+          };
+          taskRowIndex.set(entry.taskId, collapsed.length - 1);
           continue;
         }
         taskRowIndex.set(entry.taskId, collapsed.length);

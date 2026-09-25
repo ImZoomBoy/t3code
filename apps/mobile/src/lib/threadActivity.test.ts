@@ -3748,3 +3748,54 @@ it("keeps attachment-only question answers expandable outside mobile work groups
   expect(running[1]).toBe(group);
   expect(running[2]?.type).toBe("work-toggle");
 });
+
+describe("stopped background commands", () => {
+  const stoppedTask = (taskId: string, taskType: string, title: string, seconds: number) =>
+    makeActivity({
+      id: EventId.make(`stopped-${taskId}`),
+      kind: "task.completed",
+      summary: "Task stopped",
+      createdAt: `2026-04-01T00:00:0${seconds}.000Z`,
+      payload: {
+        taskId,
+        taskType,
+        agentKind: taskType === "local_agent" ? "agent" : "background",
+        title,
+        status: "stopped",
+        summary: "Orphaned by a previous Claude Code process exit.",
+        detail: "Orphaned by a previous Claude Code process exit.",
+      },
+    });
+  const rowsFor = (activities: ReadonlyArray<ReturnType<typeof makeActivity>>) =>
+    buildThreadFeed(
+      makeThread({
+        id: ThreadId.make("thread-resumed"),
+        projectId: ProjectId.make("project-1"),
+        title: "Resumed",
+        activities: [...activities],
+      }),
+    ).flatMap((entry) => (entry.type === "activity-group" ? entry.activities : []));
+
+  it("folds commands that stopped together into one row and keeps agents as subagents", () => {
+    const rows = rowsFor([
+      stoppedTask("b1", "local_bash", "New reports", 1),
+      stoppedTask("b2", "local_bash", "Worker reports or dies", 2),
+      stoppedTask("b3", "local_bash", "New reports", 3),
+      stoppedTask("a1", "local_agent", "Review the diff", 4),
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.workEntry.label).toBe(
+      "3 background commands stopped: New reports; Worker reports or dies",
+    );
+    expect(rows[0]!.workEntry.agentSpawn).toBeUndefined();
+    expect(rows[0]!.workEntry.detail).toBeUndefined();
+    expect(rows[1]!.workEntry.agentSpawn).toMatchObject({ agentTaskIds: ["a1"] });
+  });
+
+  it("labels a single stopped command with its description", () => {
+    const rows = rowsFor([stoppedTask("b1", "monitor", "Tail logs", 1)]);
+    expect(rows.map((row) => workEntryRowLabel(row.workEntry))).toEqual([
+      "Background command stopped: Tail logs",
+    ]);
+  });
+});
