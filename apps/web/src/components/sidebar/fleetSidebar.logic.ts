@@ -64,19 +64,22 @@ export interface FleetBranch<T> {
 /**
  * Pull second mates and their workers out of the thread list into a tree.
  * Branches sort by repository name and workers by launch order, never by
- * activity, so no fleet row moves when a thread gets busy. Settled and snoozed
- * fleet threads stay in the tree too. Every other thread passes through to
- * `rest` in its original order.
+ * activity, so no fleet row moves when a thread gets busy. A settled worker
+ * leaves the tree for the settled section and comes back when un-settled;
+ * snoozed workers and parked second mates stay in the tree. Every other thread
+ * passes through to `rest` in its original order.
  */
 export function buildFleetTree<T extends FleetThread>(
   threads: readonly T[],
+  options: { readonly isSettled?: (thread: T) => boolean } = {},
 ): { readonly branches: FleetBranch<T>[]; readonly rest: T[] } {
   const byRepo = new Map<string | null, { secondMate: T | null; workers: T[] }>();
   const rest: T[] = [];
   for (const thread of threads) {
     const inTree =
       thread.archivedAt === null &&
-      (thread.fleetRole === "second-mate" || thread.fleetRole === "worker");
+      (thread.fleetRole === "second-mate" ||
+        (thread.fleetRole === "worker" && options.isSettled?.(thread) !== true));
     if (!inTree) {
       rest.push(thread);
       continue;
@@ -119,7 +122,10 @@ export function buildFleetTree<T extends FleetThread>(
 /** First Mate's own colour. Second mates take theirs from their project icon. */
 export const FIRST_MATE_TONE_CLASS = "text-pink-600 dark:text-pink-400";
 
-/** A settled or snoozed fleet thread keeps its place, drawn quietly with its way back. */
+/**
+ * A snoozed fleet thread, or a settled second mate, keeps its place, drawn
+ * quietly with its way back.
+ */
 export type FleetParked = "settled" | "snoozed" | null;
 
 /** One row of the fleet tree, in display order. */

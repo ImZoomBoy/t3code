@@ -94,8 +94,9 @@ each fleet thread is labelled **First Mate**, **Second mate** or **Worker**.
   the one you want on top. The others list under it.
 - **Second mates** follow, one per repository, in repository-name order. Each keeps its place
   whatever it is doing.
-- **Workers** sit under the second mate for their repository, including workers you settle or
-  snooze. You can hide a second mate's workers and show them again.
+- **Workers** sit under the second mate for their repository, including workers you snooze. You
+  can hide a second mate's workers and show them again. A settled worker moves to **Settled** with
+  your other settled threads. Un-settle it there and it returns under its second mate.
 
 When no First Mate thread is live, for example after you archive it, choose **Start First Mate**
 at the top of the sidebar. It runs in the folder set in **Settings → General → First Mate working

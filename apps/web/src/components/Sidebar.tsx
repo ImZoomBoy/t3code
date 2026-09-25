@@ -2823,23 +2823,30 @@ export default function Sidebar() {
         (scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
-    // Second mates and their workers leave the sections for the fleet tree,
-    // settled and snoozed ones included: they park in place.
-    const fleetTree = buildFleetTree(inScope);
+    // Same order as the sections below: snooze outranks settlement.
+    const parkedState = (thread: EnvironmentThreadShell): FleetParked => {
+      const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+      if (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow })) {
+        return "snoozed";
+      }
+      if (capabilities?.threadSettlement === true && thread.settledOverride === "settled") {
+        return "settled";
+      }
+      return null;
+    };
+    // Second mates and their workers leave the sections for the fleet tree.
+    // A settled worker lists with the other settled threads instead; snoozed
+    // workers and parked second mates park in place.
+    const fleetTree = buildFleetTree(inScope, {
+      isSettled: (thread) => parkedState(thread) === "settled",
+    });
     const parked = new Map<EnvironmentThreadShell, FleetParked>();
     for (const branch of fleetTree.branches) {
       for (const thread of branch.secondMate
         ? [branch.secondMate, ...branch.workers]
         : branch.workers) {
-        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-        if (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow })) {
-          parked.set(thread, "snoozed");
-        } else if (
-          capabilities?.threadSettlement === true &&
-          thread.settledOverride === "settled"
-        ) {
-          parked.set(thread, "settled");
-        }
+        const state = parkedState(thread);
+        if (state !== null) parked.set(thread, state);
       }
     }
     const visible = fleetTree.rest;

@@ -31,8 +31,11 @@ type TestThread = ReturnType<typeof thread>;
 
 const ids = (threads: ReadonlyArray<{ readonly id: string }>) => threads.map((entry) => entry.id);
 
+const treeFor = (threads: readonly TestThread[]) =>
+  buildFleetTree(threads, { isSettled: (entry) => entry.parked === "settled" });
+
 const rowsFor = (threads: readonly TestThread[], folded: readonly string[] = []) =>
-  buildFleetRows(buildFleetTree(threads).branches, {
+  buildFleetRows(treeFor(threads).branches, {
     isFolded: (repo) => folded.includes(repo),
     parkedState: (entry) => entry.parked,
   });
@@ -129,32 +132,75 @@ describe("buildFleetTree", () => {
 
   it("passes ordinary threads through unchanged and in their order", () => {
     const plain = [thread("b"), thread("a"), thread("c")];
-    const { rest } = buildFleetTree([
+    const { rest } = treeFor([
       plain[0]!,
       thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
-      thread("w", { fleetRole: "worker", fleetRepo: "t3code", parked: "settled" }),
+      thread("w", { fleetRole: "worker", fleetRepo: "t3code", parked: "snoozed" }),
       plain[1]!,
       plain[2]!,
     ]);
     expect(rest).toEqual(plain);
   });
+
+  it("lists a settled worker with the other settled threads, not in the tree", () => {
+    const settled = thread("w-settled", {
+      fleetRole: "worker",
+      fleetRepo: "t3code",
+      parked: "settled",
+    });
+    // A worker whose repository has no second mate leaves the tree the same way.
+    const stray = thread("stray-settled", {
+      fleetRole: "worker",
+      fleetRepo: "elsewhere",
+      parked: "settled",
+    });
+    const { branches, rest } = treeFor([
+      thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
+      thread("w", { fleetRole: "worker", fleetRepo: "t3code" }),
+      settled,
+      stray,
+    ]);
+    expect(branches.map((branch) => [branch.secondMate?.id, ids(branch.workers)])).toEqual([
+      ["sm", ["w"]],
+    ]);
+    expect(rest).toEqual([settled, stray]);
+  });
+
+  it("puts a worker back under its second mate when it is un-settled", () => {
+    const fleet = (parked: "settled" | null) => [
+      thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
+      thread("w", { fleetRole: "worker", fleetRepo: "t3code", parked }),
+      thread("w-later", {
+        fleetRole: "worker",
+        fleetRepo: "t3code",
+        createdAt: "2026-09-24T11:00:00Z",
+      }),
+    ];
+    expect(ids(treeFor(fleet("settled")).rest)).toEqual(["w"]);
+    expect(treeFor(fleet(null)).rest).toEqual([]);
+    expect(ids(rowsFor(fleet(null)).map((row) => row.thread))).toEqual(["sm", "w", "w-later"]);
+  });
+
+  it("keeps a snoozed worker and a settled second mate in the tree", () => {
+    const { branches, rest } = treeFor([
+      thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code", parked: "settled" }),
+      thread("w-snoozed", { fleetRole: "worker", fleetRepo: "t3code", parked: "snoozed" }),
+    ]);
+    expect(branches.map((branch) => [branch.secondMate?.id, ids(branch.workers)])).toEqual([
+      ["sm", ["w-snoozed"]],
+    ]);
+    expect(rest).toEqual([]);
+  });
 });
 
 describe("buildFleetRows", () => {
-  it("keeps settled and snoozed workers under their second mate, marked as parked", () => {
+  it("keeps snoozed workers under their second mate, marked as parked", () => {
     const rows = rowsFor([
       thread("sm", { fleetRole: "second-mate", fleetRepo: "t3code" }),
-      thread("w-settled", { fleetRole: "worker", fleetRepo: "t3code", parked: "settled" }),
-      thread("w-snoozed", {
-        fleetRole: "worker",
-        fleetRepo: "t3code",
-        parked: "snoozed",
-        createdAt: "2026-09-24T11:00:00Z",
-      }),
+      thread("w-snoozed", { fleetRole: "worker", fleetRepo: "t3code", parked: "snoozed" }),
     ]);
     expect(rows.map((row) => [row.thread.id, row.depth, row.parked])).toEqual([
       ["sm", 0, null],
-      ["w-settled", 1, "settled"],
       ["w-snoozed", 1, "snoozed"],
     ]);
   });
