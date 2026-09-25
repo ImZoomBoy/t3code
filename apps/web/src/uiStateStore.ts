@@ -386,7 +386,7 @@ export function setProjectExpanded(
   };
 }
 
-export function setFleetRepoExpanded(state: UiState, repo: string, expanded: boolean): UiState {
+function setFleetRepoExpanded(state: UiState, repo: string, expanded: boolean): UiState {
   if ((state.fleetRepoExpandedById[repo] ?? true) === expanded) {
     return state;
   }
