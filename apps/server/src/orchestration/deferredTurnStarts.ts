@@ -235,6 +235,7 @@ export const deferTurnStartIfBusy = Effect.fn("deferTurnStartIfBusy")(function* 
         ? { sourceProposedPlan: command.sourceProposedPlan }
         : {}),
       ...(command.issuer !== undefined ? { issuer: command.issuer } : {}),
+      ...(command.fleetWake === true ? { fleetWake: true } : {}),
       ...(command.environment !== undefined ? { hasEnvironment: true as const } : {}),
       deferredAt: now,
     },
@@ -318,6 +319,7 @@ export const releaseDeferredTurnStart = Effect.fn("releaseDeferredTurnStart")(fu
         ? { sourceProposedPlan: deferred.sourceProposedPlan }
         : {}),
       ...(deferred.issuer !== undefined ? { issuer: deferred.issuer } : {}),
+      ...(deferred.fleetWake === true ? { fleetWake: true } : {}),
       runtimeMode: thread.runtimeMode,
       interactionMode: thread.interactionMode,
       createdAt: now,

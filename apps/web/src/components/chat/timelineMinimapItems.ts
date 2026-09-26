@@ -14,7 +14,8 @@ export function deriveTimelineMinimapItems(
   const items: TimelineMinimapItem[] = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
-    if (row?.kind !== "message" || row.message.role !== "user") {
+    // A fleet notice is not something the user typed, so it is no stop.
+    if (row?.kind !== "message" || row.message.role !== "user" || row.message.fleetWake === true) {
       continue;
     }
 

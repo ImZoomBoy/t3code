@@ -1643,6 +1643,7 @@ const decideCommand = Effect.fn("decideCommand")(function* ({
               ...(command.message.context !== undefined
                 ? { context: command.message.context }
                 : {}),
+              ...(command.fleetWake === true ? { fleetWake: true } : {}),
               turnId: null,
               streaming: false,
               createdAt: turnStartedAt,

@@ -56,6 +56,7 @@ const EXPECTED_FORK_MIGRATIONS = [
   { migration_id: 7, name: "ProjectionThreadsFleetOwned" },
   { migration_id: 8, name: "ProjectionThreadsFleetRole" },
   { migration_id: 9, name: "ProjectionThreadDeferredTurnStarts" },
+  { migration_id: 10, name: "ProjectionThreadMessagesFleetWake" },
 ];
 
 /**

@@ -150,6 +150,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       thread.turn.start and applies it when the held turn runs. A server that
       advertises only turnStartWhenBusy refuses that pair. */
   turnStartWhenBusyEnvironment: Schema.optionalKey(Schema.Boolean),
+  /** Server honours `fleetWake: true` on thread.turn.start: it keeps the mark
+      on the turn's user message, so clients fold that message into a notice.
+      Older servers drop the unknown field and show the prompt as a user
+      message. The turn itself runs the same either way. */
+  turnStartFleetWake: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.pin / thread.unpin commands. Same
       version-skew contract as threadSettlement. */
   threadPinning: Schema.optionalKey(Schema.Boolean),

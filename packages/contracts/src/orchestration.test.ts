@@ -422,6 +422,57 @@ it.effect("carries whenBusy on thread.turn.start and refuses an unknown value", 
   }),
 );
 
+it.effect("carries an optional fleetWake on thread.turn.start and on its message", () =>
+  Effect.gen(function* () {
+    const command = {
+      type: "thread.turn.start",
+      commandId: "cmd-turn-wake",
+      threadId: "thread-1",
+      message: { messageId: "msg-1", role: "user", text: "wake", attachments: [] },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const marked = yield* decodeThreadTurnStartCommand({ ...command, fleetWake: true });
+    assert.strictEqual(marked.fleetWake, true);
+    // The fleet sends the same shape over the socket.
+    const fromClient = yield* decodeClientOrchestrationCommand({ ...command, fleetWake: true });
+    assert.strictEqual(fromClient.type === "thread.turn.start" && fromClient.fleetWake, true);
+    // A caller that never sends it keeps working.
+    const unset = yield* decodeThreadTurnStartCommand(command);
+    assert.strictEqual(unset.fleetWake, undefined);
+    const unsetFromClient = yield* decodeClientOrchestrationCommand(command);
+    assert.strictEqual(
+      unsetFromClient.type === "thread.turn.start" && unsetFromClient.fleetWake,
+      undefined,
+    );
+
+    const message = {
+      id: "msg-1",
+      role: "user",
+      text: "wake",
+      turnId: null,
+      streaming: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    assert.strictEqual(
+      (yield* decodeOrchestrationMessage({ ...message, fleetWake: true })).fleetWake,
+      true,
+    );
+    // Messages stored before the field existed decode unmarked.
+    assert.strictEqual((yield* decodeOrchestrationMessage(message)).fleetWake, undefined);
+    const { id: messageId, ...rest } = message;
+    const sent = yield* decodeThreadMessageSentPayload({
+      threadId: "thread-1",
+      messageId,
+      ...rest,
+      fleetWake: true,
+    });
+    assert.strictEqual(sent.fleetWake, true);
+  }),
+);
+
 it.effect("accepts inline images, uploaded images, and uploaded files from clients", () =>
   Effect.gen(function* () {
     const command = yield* decodeClientOrchestrationCommand({

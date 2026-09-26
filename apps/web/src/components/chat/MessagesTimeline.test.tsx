@@ -1325,6 +1325,64 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("folds a fleet wake into a notice that expands to its prompt", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const wake = buildUserTimelineEntry("One condition is waiting on this home's trigger log.");
+    const reply = {
+      ...buildAssistantTimelineEntry("Nothing needs you right now."),
+      id: "entry-2",
+    };
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[
+              { ...wake, message: { ...wake.message, fleetWake: true } },
+              { ...reply, message: { ...reply.message, id: MessageId.make("message-2") } },
+            ]}
+          />,
+        );
+      });
+      const textOf = () =>
+        renderer!.root
+          .findAll((node) => typeof node.type === "string")
+          .flatMap((node) => node.children.filter((child) => typeof child === "string"))
+          .join(" ");
+      const notice = renderer!.root.findByProps({ "data-fleet-notice": "true" });
+      expect(renderer!.root.findAllByProps({ "data-user-message-body": "true" })).toHaveLength(0);
+      expect(textOf()).toContain("Fleet notice");
+      expect(textOf()).not.toContain("trigger log");
+      // The reply still shows as usual.
+      expect(renderer!.root.findAllByProps({ "data-message-role": "assistant" })).toHaveLength(1);
+
+      await act(() => notice.findByProps({ "aria-expanded": false }).props.onClick());
+      expect(textOf()).toContain("One condition is waiting on this home's trigger log.");
+      expect(renderer!.root.findAllByProps({ "data-user-message-body": "true" })).toHaveLength(0);
+
+      await act(() => notice.findByProps({ "aria-expanded": true }).props.onClick());
+      expect(textOf()).not.toContain("trigger log");
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
+  it("shows an unmarked user message as a user message, not a fleet notice", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildUserTimelineEntry("Please fix the build.")]}
+      />,
+    );
+
+    expect(markup).toContain("Please fix the build.");
+    expect(markup).toContain('data-user-message-body="true"');
+    expect(markup).not.toContain("Fleet notice");
+  });
+
   it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

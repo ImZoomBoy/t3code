@@ -404,6 +404,48 @@
       ],
       "test": ["packages/shared/src/forkAppIcon.test.ts", "scripts/generate-fork-icons.test.ts"],
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-fleet-wake-turn-start",
+      "description": "A turn start can be marked with fleetWake: true, so First Mate's wake prompt never shows in a thread as if the user typed it. The turn runs as an unmarked one. The decider copies the mark onto the thread.message-sent event, a deferred turn start keeps it while it waits, and fork migration 10 stores it in the fleet_wake column of projection_thread_messages, so it survives a reload and a restart. Web and desktop show the message as one muted Fleet notice line that expands to the prompt, and the timeline minimap skips it. The server advertises turnStartFleetWake in its environment capabilities.",
+      "keep": "fleetWakeTurnStart.test.ts, FleetNoticeTimelineRow.tsx and fork migration 10 are ours whole, and deferredTurnStarts.ts is ours whole including its fleetWake lines. The fleetWake fields on ThreadTurnStartCommand, the client turn start command, OrchestrationMessage, OrchestrationDeferredTurnStart and ThreadMessageSentPayload survive in orchestration.ts; the turnStartFleetWake capability survives in environment.ts and ServerEnvironment.ts and its assertion in ServerEnvironment.test.ts; the fleetWake spread on the thread.turn.start message-sent payload survives in decider.ts; the fleetWake spread on the message-sent message survives in projector.ts and threadReducer.ts; the fleetWake carry on the message upsert survives in ProjectionPipeline.ts; the fleetWake field survives in Services/ProjectionThreadMessages.ts; the fleet_wake column writes and reads and the fleetWake row mapping survive in Layers/ProjectionThreadMessages.ts and ProjectionSnapshotQuery.ts; the migration 10 entry survives in ForkMigrations.ts and ForkMigrations.test.ts; the fleetWake branch to FleetNoticeTimelineRow survives in MessagesTimeline.tsx; the fleetWake skip survives in timelineMinimapItems.ts; the fleetWake tests survive in orchestration.test.ts, threadReducer.test.ts and MessagesTimeline.test.tsx; the Fleet wake row survives in docs/internals/glossary.md; and the Fleet notice paragraph survives in docs/user/thread-sidebar.md. Everything else in those files takes upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/environment.ts",
+        "packages/client-runtime/src/state/threadReducer.ts",
+        "apps/server/src/environment/ServerEnvironment.ts",
+        "apps/server/src/orchestration/decider.ts",
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
+        "apps/server/src/orchestration/projector.ts",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts",
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts",
+        "apps/server/src/persistence/Services/ProjectionThreadMessages.ts",
+        "apps/server/src/persistence/Layers/ProjectionThreadMessages.ts",
+        "apps/server/src/persistence/ForkMigrations.ts",
+        "apps/server/src/persistence/ForkMigrations/010_ProjectionThreadMessagesFleetWake.ts",
+        "apps/web/src/components/chat/FleetNoticeTimelineRow.tsx",
+        "apps/web/src/components/chat/MessagesTimeline.tsx",
+        "apps/web/src/components/chat/timelineMinimapItems.ts",
+        "docs/internals/glossary.md",
+        "docs/user/thread-sidebar.md"
+      ],
+      "test": [
+        "apps/server/src/orchestration/fleetWakeTurnStart.test.ts",
+        "packages/contracts/src/orchestration.test.ts",
+        "packages/client-runtime/src/state/threadReducer.test.ts",
+        "apps/server/src/environment/ServerEnvironment.test.ts",
+        "apps/server/src/persistence/ForkMigrations.test.ts"
+      ],
+      "patchesUpstream": true
+    },
+    {
+      "name": "fm-fleet-wake-turn-start-timeline-tests",
+      "description": "The thread view tests for fm-fleet-wake-turn-start: a marked message renders as the folded Fleet notice line and expands to its prompt on click, and an unmarked message still renders as a user message. A testName narrows a single test file, so these tests have their own entry.",
+      "keep": "The two tests named in testName survive in MessagesTimeline.test.tsx. Everything else in that file takes upstream.",
+      "files": ["apps/web/src/components/chat/MessagesTimeline.test.tsx"],
+      "test": "apps/web/src/components/chat/MessagesTimeline.test.tsx",
+      "testName": "folds a fleet wake into a notice that expands to its prompt|shows an unmarked user message as a user message, not a fleet notice",
+      "patchesUpstream": true
     }
   ]
 }
