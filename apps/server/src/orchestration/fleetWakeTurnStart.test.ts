@@ -111,7 +111,11 @@ const createProjectAndThread = Effect.gen(function* () {
 const turnStart = (
   messageId: string,
   text: string,
-  options: { readonly fleetWake?: boolean; readonly whenBusy?: "queue" } = {},
+  options: {
+    readonly fleetWake?: boolean;
+    readonly whenBusy?: "queue";
+    readonly createdAt?: string;
+  } = {},
 ): OrchestrationCommand => ({
   type: "thread.turn.start",
   commandId: CommandId.make(`start-${messageId}`),
@@ -119,8 +123,8 @@ const turnStart = (
   message: { messageId: MessageId.make(messageId), role: "user", text, attachments: [] },
   runtimeMode: "full-access",
   interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-  ...options,
   createdAt: NOW,
+  ...options,
 });
 
 /**
@@ -185,6 +189,36 @@ it.layer(NodeServices.layer)("thread.turn.start with fleetWake", (it) => {
         databasePath,
         Effect.gen(function* () {
           expect(yield* messageEverywhere("wake-1")).toEqual(everywhere(WAKE_TEXT, true));
+        }),
+      );
+    }),
+  );
+
+  it.effect("keeps a wake out of the thread's latest user message time", () =>
+    Effect.gen(function* () {
+      const databasePath = yield* makeDatabasePath;
+      // The sidebar and the command palette order threads by this time.
+      const latestUserMessageAt = Effect.gen(function* () {
+        const snapshots = yield* ProjectionSnapshotQuery;
+        return Option.getOrThrow(yield* snapshots.getThreadShellById(THREAD_ID))
+          .latestUserMessageAt;
+      });
+
+      yield* withEngine(
+        databasePath,
+        Effect.gen(function* () {
+          yield* createProjectAndThread;
+          yield* dispatch(turnStart("wake-1", WAKE_TEXT, { fleetWake: true }));
+          expect(yield* latestUserMessageAt).toBeNull();
+        }),
+      );
+
+      yield* withEngine(
+        databasePath,
+        Effect.gen(function* () {
+          expect(yield* latestUserMessageAt).toBeNull();
+          yield* dispatch(turnStart("typed-1", "Please fix the build."));
+          expect(yield* latestUserMessageAt).not.toBeNull();
         }),
       );
     }),

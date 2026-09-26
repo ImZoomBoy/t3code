@@ -243,6 +243,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND role = 'user'
         AND message_id NOT GLOB 'import:*'
+        AND fleet_wake = 0
     `,
   });
 

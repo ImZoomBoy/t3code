@@ -1096,6 +1096,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             latestUserMessageAt:
               event.payload.role === "user" &&
               !isImportedAgentSessionMessageId(event.payload.messageId) &&
+              // A fleet wake is not something the user sent, so it does not
+              // move the thread up the user's recent list.
+              event.payload.fleetWake !== true &&
               (previousLatest === null || event.payload.createdAt > previousLatest)
                 ? event.payload.createdAt
                 : previousLatest,
