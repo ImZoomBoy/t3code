@@ -829,6 +829,7 @@ function projectCommandModelEvent(
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
             ...(payload.context !== undefined ? { context: payload.context } : {}),
+            ...(payload.fleetWake === true ? { fleetWake: true } : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
             createdAt: payload.createdAt,

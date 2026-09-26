@@ -9,6 +9,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { findLatestUserSentMessage } from "@t3tools/client-runtime/state/fleet-wake";
 import * as Option from "effect/Option";
 
 import { scopedThreadKey } from "../lib/scopedEntities";
@@ -39,14 +40,7 @@ function firstRouteParam(value: string | string[] | undefined): string | null {
 }
 
 function latestUserMessageAt(thread: OrchestrationThread): OrchestrationThread["updatedAt"] | null {
-  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
-    const message = thread.messages[index];
-    if (message?.role === "user") {
-      return message.createdAt;
-    }
-  }
-
-  return null;
+  return findLatestUserSentMessage(thread.messages)?.createdAt ?? null;
 }
 
 function threadDetailToShell(

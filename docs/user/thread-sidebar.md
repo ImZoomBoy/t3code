@@ -106,6 +106,9 @@ directory**. The first time, the desktop app asks you to choose that folder and 
 First Mate runs on Claude Opus 5.5 with the 1M context at medium effort. Each environment can have
 one live First Mate thread at a time.
 
+When First Mate wakes itself to check on its fleet, the prompt it sends shows in its thread as a
+muted **Fleet notice** line, not as a message from you. Click the line to read the prompt.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

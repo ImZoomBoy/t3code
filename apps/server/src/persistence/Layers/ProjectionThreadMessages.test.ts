@@ -67,6 +67,33 @@ layer("ProjectionThreadMessageRepository", (it) => {
     }),
   );
 
+  it.effect("leaves a fleet wake out of the latest user-message time", () =>
+    Effect.gen(function* () {
+      const repository = yield* ProjectionThreadMessageRepository;
+      const threadId = ThreadId.make("thread-latest-user-message-fleet-wake");
+      const message = (id: string, createdAt: string, fleetWake: boolean) =>
+        repository.upsert({
+          messageId: MessageId.make(id),
+          threadId,
+          turnId: null,
+          role: "user",
+          text: "Message body",
+          ...(fleetWake ? { fleetWake } : {}),
+          isStreaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        });
+
+      yield* message("fleet-wake-typed", "2026-02-28T19:05:01.000Z", false);
+      yield* message("fleet-wake-wake", "2026-02-28T19:05:02.000Z", true);
+
+      assert.strictEqual(
+        yield* repository.getLatestUserMessageAt({ threadId }),
+        "2026-02-28T19:05:01.000Z",
+      );
+    }),
+  );
+
   it.effect("persists structured context and keeps it across updates without context", () =>
     Effect.gen(function* () {
       const repository = yield* ProjectionThreadMessageRepository;

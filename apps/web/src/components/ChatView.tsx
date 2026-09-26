@@ -55,6 +55,7 @@ import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
 import { type CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import { findLatestUserSentMessage } from "@t3tools/client-runtime/state/fleet-wake";
 import {
   parseCodexFeedbackCommand,
   submitCodexFeedback,
@@ -781,9 +782,8 @@ function useLocalDispatchState(input: {
   threadError: string | null | undefined;
 }) {
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
-  const latestUserMessage = input.activeThread?.messages.findLast(
-    (message) => message.role === "user",
-  );
+  // A fleet wake arriving mid-send is not the server echoing the user's send.
+  const latestUserMessage = findLatestUserSentMessage(input.activeThread?.messages ?? []);
   const latestUserMessageId = latestUserMessage?.id ?? null;
   const currentTurnStartFailureId =
     localDispatch === null

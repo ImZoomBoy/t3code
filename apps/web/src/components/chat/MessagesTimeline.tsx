@@ -153,6 +153,7 @@ import {
   SnapShotAttachmentDetails,
 } from "./SnapShotAttachmentDetails";
 import { ProposedPlanCard } from "./ProposedPlanCard";
+import { FleetNoticeTimelineRow } from "./FleetNoticeTimelineRow";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useAtomValue } from "@effect/atom-react";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
@@ -1706,7 +1707,13 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
-      {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
+      {row.kind === "message" && row.message.role === "user" ? (
+        row.message.fleetWake === true ? (
+          <FleetNoticeTimelineRow text={row.message.text} />
+        ) : (
+          <UserTimelineRow row={row} />
+        )
+      ) : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}

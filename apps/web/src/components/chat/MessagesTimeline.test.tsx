@@ -1325,6 +1325,56 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("folds a fleet wake into a notice that expands to its prompt", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const typed = buildUserTimelineEntry("Please fix the build.");
+    const wake = buildUserTimelineEntry("One condition is waiting on this home's trigger log.");
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[
+              typed,
+              {
+                ...wake,
+                id: "entry-2",
+                message: { ...wake.message, id: MessageId.make("message-2"), fleetWake: true },
+              },
+            ]}
+          />,
+        );
+      });
+      const textNodes = () =>
+        renderer!.root
+          .findAll((node) => typeof node.type === "string")
+          .flatMap((node) => node.children.filter((child) => typeof child === "string"));
+      const noticeButtons = () =>
+        renderer!.root.findAll(
+          (node) =>
+            node.type === "button" && node.children.some((child) => child === "Fleet notice"),
+        );
+
+      // Only the typed message is headed as the user's; the wake is one line.
+      expect(textNodes().filter((text) => text === "You")).toHaveLength(1);
+      expect(noticeButtons()).toHaveLength(1);
+      expect(textNodes().join(" ")).not.toContain("trigger log");
+
+      await act(() => noticeButtons()[0]!.props.onClick());
+      expect(textNodes().join(" ")).toContain(
+        "One condition is waiting on this home's trigger log.",
+      );
+
+      await act(() => noticeButtons()[0]!.props.onClick());
+      expect(textNodes().join(" ")).not.toContain("trigger log");
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
   it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

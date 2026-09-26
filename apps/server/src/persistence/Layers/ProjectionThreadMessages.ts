@@ -24,6 +24,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
     isStreaming: Schema.Number,
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
     context: Schema.NullOr(Schema.fromJsonString(OrchestrationMessageContext)),
+    fleetWake: Schema.Number,
   }),
 );
 const ProjectionThreadMessageExistsDbRowSchema = Schema.Struct({ exists: Schema.Number });
@@ -42,6 +43,7 @@ function toProjectionThreadMessage(
     updatedAt: row.updatedAt,
     ...(row.attachments !== null ? { attachments: row.attachments } : {}),
     ...(row.context !== null ? { context: row.context } : {}),
+    ...(row.fleetWake === 1 ? { fleetWake: true } : {}),
   };
 }
 
@@ -63,6 +65,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           text,
           attachments_json,
           context_json,
+          fleet_wake,
           is_streaming,
           created_at,
           updated_at
@@ -89,6 +92,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
               WHERE message_id = ${row.messageId}
             )
           ),
+          ${row.fleetWake === true ? 1 : 0},
           ${row.isStreaming ? 1 : 0},
           ${row.createdAt},
           ${row.updatedAt}
@@ -107,6 +111,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
             excluded.context_json,
             projection_thread_messages.context_json
           ),
+          fleet_wake = excluded.fleet_wake,
           is_streaming = excluded.is_streaming,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
@@ -178,6 +183,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           context_json AS "context",
+          fleet_wake AS "fleetWake",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -217,6 +223,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           context_json AS "context",
+          fleet_wake AS "fleetWake",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -236,6 +243,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND role = 'user'
         AND message_id NOT GLOB 'import:*'
+        AND fleet_wake = 0
     `,
   });
 

@@ -579,6 +579,9 @@ export const OrchestrationMessage = Schema.Struct({
   context: Schema.optional(OrchestrationMessageContext),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
+  // A user message sent by a turn start marked `fleetWake`. Clients fold it
+  // into a notice instead of showing it as typed. Absent means false.
+  fleetWake: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -825,6 +828,8 @@ export const OrchestrationDeferredTurnStart = Schema.Struct({
   // server memory and never reaches an event, so after a restart this is how
   // the server knows it is gone.
   hasEnvironment: Schema.optional(Schema.Literal(true)),
+  // See `ThreadTurnStartCommand.fleetWake`.
+  fleetWake: Schema.optional(Schema.Boolean),
   deferredAt: IsoDateTime,
 });
 export type OrchestrationDeferredTurnStart = typeof OrchestrationDeferredTurnStart.Type;
@@ -1464,6 +1469,11 @@ export const ThreadTurnStartCommand = Schema.Struct({
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   // Absent means `steer`. See `TurnStartWhenBusy`.
   whenBusy: Schema.optional(TurnStartWhenBusy),
+  // Marks a turn a supervisor such as First Mate started to wake its agent.
+  // The turn runs exactly as an unmarked one. Only its user message carries
+  // the mark, so clients show a folded notice instead of a typed message.
+  // Absent means false. See the `turnStartFleetWake` capability.
+  fleetWake: Schema.optional(Schema.Boolean),
   // Environment for the process this turn spawns, on top of the provider
   // instance's own environment. It reaches the driver out of band and is
   // never written to an event, because its values name paths on the server's
@@ -1496,6 +1506,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   whenBusy: Schema.optional(TurnStartWhenBusy),
+  fleetWake: Schema.optional(Schema.Boolean),
   // Same field, and the same rule, as `ThreadTurnStartCommand.environment`.
   environment: Schema.optional(ProviderInstanceEnvironment),
   createdAt: IsoDateTime,
@@ -2175,6 +2186,8 @@ export const ThreadMessageSentPayload = Schema.Struct({
   // Events persisted before the field existed carry no key at all.
   turnId: Schema.NullOr(TurnId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   streaming: Schema.Boolean,
+  // See `OrchestrationMessage.fleetWake`.
+  fleetWake: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

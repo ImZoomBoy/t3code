@@ -193,6 +193,7 @@ import {
 } from "../files/filePath";
 import { fileChipMenu, resolveFileChipTarget, type FileChipAction } from "./fileChipMenu";
 import { useFileChipShare } from "./useFileChipShare";
+import { FleetNoticeRow } from "./FleetNoticeRow";
 import {
   MarkdownImageAvailableWidthContext,
   ThreadMarkdownImage,
@@ -1512,6 +1513,18 @@ function renderFeedEntry(
             </View>
           </MarkdownImageAvailableWidthContext>
         </ThreadReasoningRow>
+      );
+    }
+    if (message.role === "user" && message.fleetWake === true) {
+      // Shares the reasoning rows' expanded set: both are message rows that
+      // fold, and the set already survives recycling and keeps the scroll.
+      return (
+        <FleetNoticeRow
+          text={message.text}
+          expanded={props.expandedReasoningMessageIds.has(entry.id)}
+          iconSubtleColor={iconSubtleColor}
+          onToggle={() => props.onToggleReasoning(entry.id)}
+        />
       );
     }
     const isUser = message.role === "user";

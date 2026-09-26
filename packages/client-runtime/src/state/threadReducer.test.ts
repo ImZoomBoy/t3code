@@ -656,6 +656,34 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
+    it("keeps the fleet wake mark on a new message", () => {
+      const sent = (messageId: string, fleetWake?: boolean) =>
+        applyThreadDetailEvent(baseThread, {
+          ...baseEventFields,
+          sequence: 6,
+          occurredAt: "2026-04-01T06:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.message-sent",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            messageId: MessageId.make(messageId),
+            role: "user",
+            text: "wake",
+            turnId: null,
+            streaming: false,
+            ...(fleetWake !== undefined ? { fleetWake } : {}),
+            createdAt: "2026-04-01T06:00:00.000Z",
+            updatedAt: "2026-04-01T06:00:00.000Z",
+          },
+        });
+      const marked = sent("msg-wake", true);
+      const unmarked = sent("msg-typed");
+      if (marked.kind !== "updated" || unmarked.kind !== "updated") throw new Error("not applied");
+      expect(marked.thread.messages.at(-1)?.fleetWake).toBe(true);
+      expect(unmarked.thread.messages.at(-1)).not.toHaveProperty("fleetWake");
+    });
+
     it("appends a new message", () => {
       const result = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,

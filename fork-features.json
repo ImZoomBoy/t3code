@@ -404,6 +404,57 @@
       ],
       "test": ["packages/shared/src/forkAppIcon.test.ts", "scripts/generate-fork-icons.test.ts"],
       "patchesUpstream": true
+    },
+    {
+      "name": "fm-fleet-wake-turn-start",
+      "description": "A turn start can be marked with fleetWake: true, so First Mate's wake prompt never shows in a thread as if the user typed it. The turn runs as an unmarked one. The decider copies the mark onto the thread.message-sent event, a deferred turn start keeps it while it waits, and fork migration 10 stores it in the fleet_wake column of projection_thread_messages, so it survives a reload and a restart. Web, desktop and mobile show the message as one muted Fleet notice line that expands to the prompt, and the web timeline minimap skips it. A wake is not the user's own message: it does not set a thread's latestUserMessageAt, so it does not move the thread up the sidebar or the command palette, and web does not take it as the server echoing the user's send. The decider's queued turn start guard still counts it, since a wake is real pending work. The server advertises turnStartFleetWake in its environment capabilities.",
+      "keep": "fleetWakeTurnStart.test.ts, fleetWake.ts and fleetWake.test.ts in client-runtime, FleetNoticeTimelineRow.tsx, FleetNoticeRow.tsx and FleetNoticeRow.test.tsx in mobile, and fork migration 10 are ours whole, and deferredTurnStarts.ts is ours whole including its fleetWake lines. The fleetWake fields on ThreadTurnStartCommand, the client turn start command, OrchestrationMessage, OrchestrationDeferredTurnStart and ThreadMessageSentPayload survive in orchestration.ts; the turnStartFleetWake capability survives in environment.ts and ServerEnvironment.ts and its assertion in ServerEnvironment.test.ts; the fleetWake spread on the thread.turn.start message-sent payload survives in decider.ts; the fleetWake spread on the message-sent message survives in projector.ts and threadReducer.ts; the fleetWake carry on the message upsert and the fleetWake skip in the latestUserMessageAt fold survive in ProjectionPipeline.ts; the fleetWake field survives in Services/ProjectionThreadMessages.ts; the fleet_wake column writes and reads, the fleetWake row mapping and the fleet_wake = 0 filter on the latest user message time survive in Layers/ProjectionThreadMessages.ts, and the column reads and row mapping in ProjectionSnapshotQuery.ts; the migration 10 entry survives in ForkMigrations.ts and ForkMigrations.test.ts; the ./state/fleet-wake export survives in client-runtime package.json; the findLatestUserSentMessage call survives in ChatView.tsx and in mobile use-thread-selection.ts; the fleetWake branch to FleetNoticeTimelineRow survives in MessagesTimeline.tsx; the fleetWake branch to FleetNoticeRow survives in mobile ThreadFeed.tsx; the fleetWake skip survives in timelineMinimapItems.ts; the fleetWake tests survive in orchestration.test.ts, threadReducer.test.ts, Layers/ProjectionThreadMessages.test.ts and MessagesTimeline.test.tsx; the Fleet wake row survives in docs/internals/glossary.md; and the Fleet notice paragraph survives in docs/user/thread-sidebar.md. Everything else in those files takes upstream.",
+      "files": [
+        "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/environment.ts",
+        "packages/client-runtime/src/state/threadReducer.ts",
+        "apps/server/src/environment/ServerEnvironment.ts",
+        "apps/server/src/orchestration/decider.ts",
+        "apps/server/src/orchestration/deferredTurnStarts.ts",
+        "apps/server/src/orchestration/projector.ts",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts",
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts",
+        "apps/server/src/persistence/Services/ProjectionThreadMessages.ts",
+        "apps/server/src/persistence/Layers/ProjectionThreadMessages.ts",
+        "apps/server/src/persistence/ForkMigrations.ts",
+        "apps/server/src/persistence/ForkMigrations/010_ProjectionThreadMessagesFleetWake.ts",
+        "apps/web/src/components/chat/FleetNoticeTimelineRow.tsx",
+        "apps/web/src/components/chat/MessagesTimeline.tsx",
+        "apps/web/src/components/chat/timelineMinimapItems.ts",
+        "docs/internals/glossary.md",
+        "docs/user/thread-sidebar.md",
+        "packages/client-runtime/src/state/fleetWake.ts",
+        "packages/client-runtime/package.json",
+        "apps/web/src/components/ChatView.tsx",
+        "apps/mobile/src/features/threads/FleetNoticeRow.tsx",
+        "apps/mobile/src/features/threads/ThreadFeed.tsx",
+        "apps/mobile/src/state/use-thread-selection.ts"
+      ],
+      "test": [
+        "apps/server/src/orchestration/fleetWakeTurnStart.test.ts",
+        "packages/contracts/src/orchestration.test.ts",
+        "packages/client-runtime/src/state/threadReducer.test.ts",
+        "apps/server/src/environment/ServerEnvironment.test.ts",
+        "apps/server/src/persistence/ForkMigrations.test.ts",
+        "packages/client-runtime/src/state/fleetWake.test.ts",
+        "apps/server/src/persistence/Layers/ProjectionThreadMessages.test.ts",
+        "apps/mobile/src/features/threads/FleetNoticeRow.test.tsx"
+      ],
+      "patchesUpstream": true
+    },
+    {
+      "name": "fm-fleet-wake-turn-start-timeline-tests",
+      "description": "The thread view test for fm-fleet-wake-turn-start: a typed message still shows as the user's, a marked message shows as one Fleet notice line, and clicking the line shows and hides its prompt. A testName narrows a single test file, so this test has its own entry.",
+      "keep": "The test named in testName survives in MessagesTimeline.test.tsx. Everything else in that file takes upstream.",
+      "files": ["apps/web/src/components/chat/MessagesTimeline.test.tsx"],
+      "test": "apps/web/src/components/chat/MessagesTimeline.test.tsx",
+      "testName": "folds a fleet wake into a notice that expands to its prompt",
+      "patchesUpstream": true
     }
   ]
 }
