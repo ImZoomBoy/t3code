@@ -455,6 +455,60 @@
       "test": "apps/web/src/components/chat/MessagesTimeline.test.tsx",
       "testName": "folds a fleet wake into a notice that expands to its prompt",
       "patchesUpstream": true
+    },
+    {
+      "name": "claude-turn-ends-on-its-own-result",
+      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. The requested turn now ends only on the result that echoes its prompt's uuid, not on the notice's result.",
+      "keep": "In ClaudeAdapter.ts resultAnswersTurn and its early return in handleResultMessage survive, and in ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts"
+      ],
+      "test": "apps/server/src/provider/Layers/ClaudeAdapter.test.ts",
+      "testName": "ends a resumed turn on its own prompt's result",
+      "patchesUpstream": true
+    },
+    {
+      "name": "provider-intake-backlog",
+      "description": "Runtime ingestion records each provider event as it is queued and applied, per thread, in ProviderIntakeLag. The HTTP shell snapshot reports the backlog as providerIntake, so a client can tell its view is behind the provider. ProviderIntakeLag.ts is the fork's own module and upstream has no file at that path.",
+      "keep": "ProviderIntakeLag.ts is ours whole. These survive: the recordQueued and recordApplied calls in ProviderRuntimeIngestion.ts, ProviderIntakeLag.layer in runtimeLayer.ts, the providerIntake field built in the shellSnapshot handler of http.ts, ProviderIntakeBacklog and the optional providerIntake field of OrchestrationShellSnapshot in orchestration.ts, the ProviderIntakeLag.layer provided in server.test.ts and OrchestrationEngineHarness.integration.ts, and in ProviderRuntimeIngestion.test.ts the intakeGate harness option, the intakeLag and emitAndWaitForEnqueue harness members and the test named in testName. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/orchestration/ProviderIntakeLag.ts",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts",
+        "apps/server/src/orchestration/runtimeLayer.ts",
+        "apps/server/src/orchestration/http.ts",
+        "packages/contracts/src/orchestration.ts",
+        "apps/server/src/server.test.ts",
+        "apps/server/integration/OrchestrationEngineHarness.integration.ts",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts",
+      "testName": "reports a thread's queued provider events until they are applied",
+      "patchesUpstream": true
+    },
+    {
+      "name": "reaper-spares-busy-sessions",
+      "description": "The provider session reaper never stops a session whose projection shows it starting or running, whose provider events are still queued, whose last provider event is recent, or whose adapter reports it mid-turn. It asks the adapter last, just before stopping, and logs the evidence it stopped on.",
+      "keep": "In ProviderSessionReaper.ts the intake backlog check, the last provider event in lastActivityMs, the starting and running status check, the live adapter session check and the extra fields on the provider.session.reaped log survive. In ProviderSessionReaper.test.ts the liveSessions harness option, ProviderIntakeLag.layer in the harness and the describe block named in testName survive. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/provider/Layers/ProviderSessionReaper.ts",
+        "apps/server/src/provider/Layers/ProviderSessionReaper.test.ts"
+      ],
+      "test": "apps/server/src/provider/Layers/ProviderSessionReaper.test.ts",
+      "testName": "never stops a session whose view is behind its provider",
+      "patchesUpstream": true
+    },
+    {
+      "name": "stopped-turn-settles-interrupted",
+      "description": "A turn.completed whose state is interrupted or cancelled, such as a session stop, sets the session interrupted, so the turn settles interrupted instead of completed, as turn.aborted already did.",
+      "keep": "In ProviderRuntimeIngestion.ts the interrupted and cancelled branch of the turn.completed session status survives, and in ProviderRuntimeIngestion.test.ts the test named in testName survives. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts",
+      "testName": "not completed",
+      "patchesUpstream": true
     }
   ]
 }

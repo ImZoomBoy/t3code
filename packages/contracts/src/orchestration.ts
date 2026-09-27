@@ -1018,11 +1018,29 @@ export const OrchestrationThreadShell = Schema.Struct({
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
+/**
+ * Provider events the server has received but not yet applied to the
+ * projection. A thread listed here shows state older than its provider.
+ */
+export const ProviderIntakeBacklog = Schema.Struct({
+  pendingEvents: NonNegativeInt,
+  oldestPendingAt: Schema.NullOr(IsoDateTime),
+  threads: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      pendingEvents: NonNegativeInt,
+      oldestPendingAt: IsoDateTime,
+    }),
+  ),
+});
+export type ProviderIntakeBacklog = typeof ProviderIntakeBacklog.Type;
+
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
+  providerIntake: Schema.optional(ProviderIntakeBacklog),
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
 

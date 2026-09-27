@@ -1745,6 +1745,21 @@ function isOverloadedResult(result: SDKResultMessage): boolean {
   return result.subtype === "success" && result.api_error_status === 529;
 }
 
+/**
+ * Whether a result ends the turn whose prompt was sent with `turnId` as its
+ * uuid. A result that echoes the prompts it consumed answers the turn only if
+ * that list holds the turn's uuid. A queued task notice's result echoes none
+ * and says so in its origin. Results with neither (older CLIs, zeroed failure
+ * results) still end the turn.
+ */
+function resultAnswersTurn(result: SDKResultMessage, turnId: string): boolean {
+  const echoed =
+    result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : []);
+  if (echoed.includes(turnId)) return true;
+  if (result.origin?.kind === "task-notification") return false;
+  return echoed.length === 0;
+}
+
 /** Derives turn status and its error from the same provider result. */
 function resultOutcome(
   result: SDKResultMessage,
@@ -3551,6 +3566,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const turn = context.turnState;
+    // On resume after a process died with background tasks running, Claude
+    // Code runs a queued orphaned-task notice as its own turn before the
+    // prompt. That result is not the requested turn's end: the requested turn
+    // ends on the result that echoes the uuid its prompt was sent with.
+    if (turn && turn.synthetic !== true && !resultAnswersTurn(message, turn.turnId)) {
+      yield* Effect.logInfo("claude.turn.result-for-other-prompt", {
+        threadId: context.session.threadId,
+        turnId: turn.turnId,
+        origin: message.origin?.kind,
+        userMessageUuid: message.user_message_uuid,
+        numTurns: message.num_turns,
+      });
+      return;
+    }
     const failureHint =
       turn?.authenticationFailureMessage ??
       (turn && (turn.rejectedRateLimitTypes.size > 0 || turn.latestAssistantRateLimited)

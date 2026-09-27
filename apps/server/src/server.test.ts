@@ -127,6 +127,7 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationThreadSettleBlockedError } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderIntakeLag from "./orchestration/ProviderIntakeLag.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
@@ -1007,6 +1008,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mergeAll(
+          ProviderIntakeLag.layer,
           Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
             readEvents: () => Stream.empty,
             readThreadEvents: () => Stream.empty,

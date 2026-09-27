@@ -46,6 +46,7 @@ import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/La
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
+import { ProviderIntakeLagService } from "../ProviderIntakeLag.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -1035,6 +1036,7 @@ export function runtimeEventToActivities(
 const make = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
+  const intakeLag = yield* ProviderIntakeLagService;
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -1876,10 +1878,16 @@ const make = Effect.gen(function* () {
               return "stopped";
             case "turn.aborted":
               return "interrupted";
-            case "turn.completed":
-              return normalizeRuntimeTurnState(event.payload.state) === "failed"
+            case "turn.completed": {
+              // A turn stopped before it finished (a session stop, a
+              // cancelled run) settles as interrupted, like turn.aborted.
+              const turnState = normalizeRuntimeTurnState(event.payload.state);
+              return turnState === "failed"
                 ? "error"
-                : "ready";
+                : turnState === "interrupted" || turnState === "cancelled"
+                  ? "interrupted"
+                  : "ready";
+            }
             case "session.started":
             case "thread.started":
               // Provider thread/session start notifications can arrive during an
@@ -2686,7 +2694,14 @@ const make = Effect.gen(function* () {
       );
 
   const worker = yield* makeDrainableWorker((input: RuntimeIngestionInput) =>
-    processInput(input).pipe(logIngestionFailure(input.source, input.event)),
+    processInput(input).pipe(
+      logIngestionFailure(input.source, input.event),
+      Effect.ensuring(
+        input.source === "runtime"
+          ? Effect.sync(() => intakeLag.recordApplied(input.event.threadId))
+          : Effect.void,
+      ),
+    ),
   );
 
   // Repository detection for a diff goes through VCS subprocesses, which can
@@ -2713,7 +2728,10 @@ const make = Effect.gen(function* () {
         Stream.runForEach(providerService.streamEvents, (event) =>
           event.type === "turn.diff.updated"
             ? diffWorker.enqueue(event)
-            : worker.enqueue({ source: "runtime", event }),
+            : Clock.currentTimeMillis.pipe(
+                Effect.tap((now) => Effect.sync(() => intakeLag.recordQueued(event.threadId, now))),
+                Effect.andThen(worker.enqueue({ source: "runtime", event })),
+              ),
         ),
       );
       yield* forkParked(
