@@ -471,7 +471,7 @@
     {
       "name": "provider-intake-backlog",
       "description": "Runtime ingestion records each provider event per thread in ProviderIntakeLag as it is queued and applied, and forgets a thread when its session ends or it is deleted. The HTTP shell snapshot and fleet_list_threads report the backlog. Shell subscriptions that ask for it receive provider-intake items naming the threads more than 5 seconds behind. client-runtime keeps the latest one on the shell snapshot, never in the cache, and the web sidebar labels such a row Catching up. ProviderIntakeLag.ts is the fork's own module and upstream has no file at that path.",
-      "keep": "ProviderIntakeLag.ts and ProviderIntakeLag.test.ts are ours whole. These survive: the recordQueued, recordApplied and forgetThread calls in ProviderRuntimeIngestion.ts; ProviderIntakeLag.layer in runtimeLayer.ts; the providerIntake field in the shellSnapshot handler of http.ts; the shellProviderIntake flag and the behindBacklogChanges merge in the subscribeShell handler of ws.ts; ProviderIntakeBacklog, the optional providerIntake field of OrchestrationShellSnapshot, the provider-intake item of OrchestrationShellStreamItem and requestProviderIntake in orchestration.ts; shellProviderIntake in server.ts; the providerIntake field in the fleet tools.ts and handlers.ts; latestIntake, withIntake, intakeRequest and the persist destructuring in client-runtime shell.ts; threadIntakeBehindSinceAtom in threadShell.ts; useThreadIntakeBehindSince in web entities.ts and the catchingUp status in Sidebar.tsx; ProviderIntakeLag.layer in server.test.ts and OrchestrationEngineHarness.integration.ts; and the tests that exercise them. Everything else in those files takes upstream.",
+      "keep": "ProviderIntakeLag.ts and ProviderIntakeLag.test.ts are ours whole. These survive: the recordQueued, recordApplied and forgetThread calls in ProviderRuntimeIngestion.ts; ProviderIntakeLag.layer in runtimeLayer.ts; the providerIntake field in the shellSnapshot handler of http.ts; the shellProviderIntake flag and the behindBacklogChanges merge in the subscribeShell handler of ws.ts; ProviderIntakeBacklog, the optional providerIntake field of OrchestrationShellSnapshot, the provider-intake item of OrchestrationShellStreamItem and requestProviderIntake in orchestration.ts; shellProviderIntake in server.ts; the providerIntake field in the fleet tools.ts and handlers.ts; latestIntake, withIntake, intakeRequest and the persist destructuring in client-runtime shell.ts; threadIntakeBehindSinceAtom in threadShell.ts; useThreadIntakeBehindSince in web entities.ts and the catchingUp status in Sidebar.tsx; ProviderIntakeLag.layer in server.test.ts, McpHttpServer.test.ts and OrchestrationEngineHarness.integration.ts; and the tests that exercise them. Everything else in those files takes upstream.",
       "files": [
         "apps/server/src/orchestration/ProviderIntakeLag.ts",
         "apps/server/src/orchestration/ProviderIntakeLag.test.ts",
@@ -492,7 +492,8 @@
         "apps/web/src/components/Sidebar.tsx",
         "apps/server/src/server.test.ts",
         "apps/server/integration/OrchestrationEngineHarness.integration.ts",
-        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts"
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts",
+        "apps/server/src/mcp/McpHttpServer.test.ts"
       ],
       "test": "apps/server/src/orchestration/ProviderIntakeLag.test.ts",
       "patchesUpstream": true

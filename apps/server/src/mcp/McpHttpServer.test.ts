@@ -24,6 +24,7 @@ import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/uns
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderIntakeLag from "../orchestration/ProviderIntakeLag.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -818,6 +819,7 @@ const fleetInvocation = {
 
 const FleetTestLayer = McpHttpServer.FleetToolkitRegistrationLive.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provide(ProviderIntakeLag.layer),
   Layer.provide(
     Layer.succeed(ProjectionSnapshotQuery, {
       getUserInputActivity: () => Effect.die("unused"),
