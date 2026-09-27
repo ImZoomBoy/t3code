@@ -122,6 +122,7 @@ import {
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { spawnAndCollect } from "../providerSnapshot.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { sessionProcessJobEnv } from "../../process/sessionProcessJob.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const encodeHistoryArgs = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -5018,10 +5019,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         supportedDialogKinds: ["resume_return"],
         // This turn's own environment, if it carried one. See
         // `applyTurnEnvironment` for the PATH prefix rule.
-        env: applyTurnEnvironment(
-          McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
-          input.environment,
-        ),
+        env: {
+          ...applyTurnEnvironment(
+            McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
+            input.environment,
+          ),
+          ...sessionProcessJobEnv,
+        },
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession

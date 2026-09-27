@@ -24,6 +24,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { sessionProcessJobEnv } from "../../process/sessionProcessJob.ts";
 import { appendAcpStderrTail, sanitizeAcpStderrExcerpt } from "./AcpStderr.ts";
 import {
   advertisesSessionList,
@@ -580,7 +581,7 @@ export const make = (
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(options.spawn.env ? { env: options.spawn.env } : {}),
+          env: { ...options.spawn.env, ...sessionProcessJobEnv },
           extendEnv: options.spawn.extendEnv ?? true,
           shell: spawnCommand.shell,
         }),
