@@ -710,8 +710,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
               // relying on inheritance) because `extendEnv` is false whenever
               // `input.environment` is provided.
               OPENCODE_CONFIG_CONTENT: resolveOpenCodeConfigContent(input.environment),
-              // One server hosts every session of this provider instance, so
-              // its tree ends when the server does: after its last session.
+              // Each chat session starts its own server, so a session's tree
+              // ends when that session stops. The shared server that probes and
+              // text generation borrow ends after its idle timeout.
               ...sessionProcessJobEnv,
             },
             extendEnv: input.environment === undefined,

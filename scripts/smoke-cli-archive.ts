@@ -171,6 +171,14 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       detail: `no 200 from / within 30s\n${stdout}${stderr}`,
     });
   }
+  // Logged by apps/server/src/server.ts when the Windows job binding does not
+  // work, which would let a session's processes outlive the session.
+  if (`${stdout}${stderr}`.includes("Session process jobs are unavailable")) {
+    return yield* new CliArchiveSmokeError({
+      step: "starting session process jobs",
+      detail: `${stdout}${stderr}`,
+    });
+  }
   yield* Effect.log(`[cli-smoke] ${root}: --version passed and serve answered on ${String(port)}.`);
 });
 

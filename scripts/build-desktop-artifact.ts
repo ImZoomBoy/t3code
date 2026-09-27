@@ -584,6 +584,19 @@ if (!result.ok) throw new Error(result.error);
 result.value.destroy();
 `;
 
+// Loads ffi-rs the way the server bundle does and makes a job object, which is
+// what ends a provider session's processes with the session on Windows.
+const WINDOWS_PRIMARY_FFI_PROBE_SOURCE = `
+const { createRequire } = await import("node:module");
+const { DataType, load, open } = createRequire(process.argv[1])("ffi-rs");
+open({ library: "kernel32", path: "kernel32.dll" });
+const call = (funcName, retType, paramsType, paramsValue) =>
+  load({ library: "kernel32", funcName, retType, paramsType, paramsValue });
+const job = call("CreateJobObjectW", DataType.BigInt, [DataType.BigInt, DataType.BigInt], [0n, 0n]);
+if (job === 0n) throw new Error("CreateJobObjectW failed.");
+call("CloseHandle", DataType.Boolean, [DataType.BigInt], [job]);
+`;
+
 export class ExternalizedBundleError extends Schema.TaggedError<ExternalizedBundleError>()(
   "ExternalizedBundleError",
   { sentinel: Schema.String, inlinedPackageCount: Schema.Number },
@@ -698,12 +711,13 @@ export class WindowsPrimaryNativeProbeError extends Schema.TaggedError<WindowsPr
   "WindowsPrimaryNativeProbeError",
   {
     executablePath: Schema.String,
+    module: Schema.String,
     exitCode: Schema.Number,
     output: Schema.String,
   },
 ) {
   override get message(): string {
-    return `The packaged Windows primary could not load fff from server.asar (exit ${this.exitCode}). Output:\n${this.output}`;
+    return `The packaged Windows primary could not load ${this.module} from server.asar (exit ${this.exitCode}). Output:\n${this.output}`;
   }
 }
 
@@ -3006,8 +3020,8 @@ const countPayloadFiles = Effect.fn("desktopArtifact.countPayloadFiles")(functio
   return count;
 });
 
-export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
-  "desktopArtifact.verifyWindowsPrimaryFffNativeLoad",
+export const verifyWindowsPrimaryNativeLoads = Effect.fn(
+  "desktopArtifact.verifyWindowsPrimaryNativeLoads",
 )(function* (input: {
   readonly packagedAppDir: string;
   readonly asarPath: string;
@@ -3024,6 +3038,7 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
   if (executableStat?.type !== "File") {
     return yield* new WindowsPrimaryNativeProbeError({
       executablePath,
+      module: "fff",
       exitCode: -1,
       output: "The unpacked application does not contain its expected primary executable.",
     });
@@ -3041,53 +3056,54 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
   delete probeEnv.ELECTRON_NO_ASAR;
   delete probeEnv.NODE_OPTIONS;
 
-  yield* runCommand(
-    ChildProcess.make(
-      executablePath,
-      [
-        "--no-global-search-paths",
-        "--input-type=module",
-        "--eval",
-        WINDOWS_PRIMARY_FFF_PROBE_SOURCE,
-        fffEntryPath,
-        probeRoot,
-      ],
-      {
-        cwd: input.packagedAppDir,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: {
-          ...probeEnv,
-          ELECTRON_RUN_AS_NODE: "1",
-          NODE_PATH: "",
+  const probe = (module: string, source: string, args: ReadonlyArray<string>) =>
+    runCommand(
+      ChildProcess.make(
+        executablePath,
+        ["--no-global-search-paths", "--input-type=module", "--eval", source, ...args],
+        {
+          cwd: input.packagedAppDir,
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            ...probeEnv,
+            ELECTRON_RUN_AS_NODE: "1",
+            NODE_PATH: "",
+          },
         },
+      ),
+      {
+        label: `Windows primary ${module} native-load probe`,
+        verbose: input.verbose,
       },
-    ),
-    {
-      label: "Windows primary fff native-load probe",
-      verbose: input.verbose,
-    },
-  ).pipe(
-    Effect.timeout(WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT),
-    Effect.catchTags({
-      TimeoutError: () =>
-        Effect.fail(
-          new WindowsPrimaryNativeProbeError({
-            executablePath,
-            exitCode: -1,
-            output: `The native-load probe did not finish within ${Duration.toSeconds(WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT)}s.`,
-          }),
-        ),
-      BuildCommandFailedError: (error) =>
-        Effect.fail(
-          new WindowsPrimaryNativeProbeError({
-            executablePath,
-            exitCode: error.exitCode,
-            output: `${error.stderrTail ?? ""}${error.stdoutTail ?? ""}`.trim(),
-          }),
-        ),
-    }),
-  );
+    ).pipe(
+      Effect.timeout(WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT),
+      Effect.catchTags({
+        TimeoutError: () =>
+          Effect.fail(
+            new WindowsPrimaryNativeProbeError({
+              executablePath,
+              module,
+              exitCode: -1,
+              output: `The native-load probe did not finish within ${Duration.toSeconds(WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT)}s.`,
+            }),
+          ),
+        BuildCommandFailedError: (error) =>
+          Effect.fail(
+            new WindowsPrimaryNativeProbeError({
+              executablePath,
+              module,
+              exitCode: error.exitCode,
+              output: `${error.stderrTail ?? ""}${error.stdoutTail ?? ""}`.trim(),
+            }),
+          ),
+      }),
+    );
+
+  yield* probe("fff", WINDOWS_PRIMARY_FFF_PROBE_SOURCE, [fffEntryPath, probeRoot]);
+  yield* probe("ffi-rs", WINDOWS_PRIMARY_FFI_PROBE_SOURCE, [
+    path.join(input.asarPath, "apps/server/dist/bin.mjs"),
+  ]);
 });
 
 export const validateWindowsPackagedPayload = Effect.fn(
@@ -3307,7 +3323,7 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
-  yield* verifyWindowsPrimaryFffNativeLoad({
+  yield* verifyWindowsPrimaryNativeLoads({
     packagedAppDir,
     asarPath,
     appExecutableName: input.appExecutableName,
