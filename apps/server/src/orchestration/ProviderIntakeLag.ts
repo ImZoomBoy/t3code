@@ -47,7 +47,7 @@ export class ProviderIntakeLagService extends Context.Service<
   }
 >()("t3/orchestration/ProviderIntakeLag/ProviderIntakeLagService") {}
 
-export function make(): ProviderIntakeLagService["Service"] {
+function make(): ProviderIntakeLagService["Service"] {
   // Per thread, the queue times of events not yet applied, oldest first. The
   // intake worker applies events in queue order, so the front is the oldest.
   const pendingByThreadId = new Map<string, number[]>();
