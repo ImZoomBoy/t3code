@@ -1567,26 +1567,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
-  // Per-thread lock held by sendTurn while it hands a turn to the adapter,
-  // and by stopIdleSession while it checks and stops. A turn cannot start
-  // between that check and the stop. Entries go when the last holder leaves.
+  // Per-thread lock between turn starts and idle stops. Each sendTurn holds
+  // one permit while it hands a turn to the adapter, so concurrent sends (a
+  // steer) do not wait on each other. stopIdleSession takes every permit, so
+  // no turn can start between its idle check and the stop. Entries go when
+  // the last holder leaves.
+  const THREAD_LOCK_PERMITS = 1024;
   const threadLocks = new Map<
     ThreadId,
     { readonly semaphore: Semaphore.Semaphore; holders: number }
   >();
   const withThreadLock =
-    (threadId: ThreadId) =>
+    (threadId: ThreadId, mode: "turn-start" | "stop") =>
     <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       Effect.suspend(() => {
         let entry = threadLocks.get(threadId);
         if (entry === undefined) {
-          entry = { semaphore: Semaphore.makeUnsafe(1), holders: 0 };
+          entry = { semaphore: Semaphore.makeUnsafe(THREAD_LOCK_PERMITS), holders: 0 };
           threadLocks.set(threadId, entry);
         }
         const held = entry;
         held.holders += 1;
         return held.semaphore
-          .withPermits(1)(effect)
+          .withPermits(mode === "stop" ? THREAD_LOCK_PERMITS : 1)(effect)
           .pipe(
             Effect.ensuring(
               Effect.sync(() => {
@@ -1808,7 +1811,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       return turn;
     }).pipe(
-      withThreadLock(input.threadId),
+      withThreadLock(input.threadId, "turn-start"),
       withMetrics({
         counter: providerTurnsTotal,
         timer: providerTurnDuration,
@@ -2079,7 +2082,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         yield* stopSession(input);
         return { stopped: true } as const;
-      }).pipe(withThreadLock(input.threadId));
+      }).pipe(withThreadLock(input.threadId, "stop"));
     },
   );
 
