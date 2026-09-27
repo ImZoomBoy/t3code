@@ -36,6 +36,7 @@ import * as NetService from "@t3tools/shared/Net";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { sessionProcessJobEnv } from "../process/sessionProcessJob.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const OPENCODE_EMPTY_CONFIG_CONTENT = "{}";
 
@@ -709,6 +710,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
               // relying on inheritance) because `extendEnv` is false whenever
               // `input.environment` is provided.
               OPENCODE_CONFIG_CONTENT: resolveOpenCodeConfigContent(input.environment),
+              // One server hosts every session of this provider instance, so
+              // its tree ends when the server does: after its last session.
+              ...sessionProcessJobEnv,
             },
             extendEnv: input.environment === undefined,
           }),

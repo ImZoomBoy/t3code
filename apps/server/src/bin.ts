@@ -15,6 +15,7 @@ import { pairCommand } from "./cli/pair.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { isEntrypoint } from "./entrypoint.ts";
+import { installSessionProcessJobs } from "./process/sessionProcessJob.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { serviceCommand } from "./cli/service.ts";
@@ -90,6 +91,8 @@ if (
   // Guarded by the entrypoint check because importing the CLI as a library must
   // not patch a host process's prototypes behind its back.
   hideWindowsConsoleWindows();
+  // Every process a provider session starts ends with the session on Windows.
+  installSessionProcessJobs();
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),

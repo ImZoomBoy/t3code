@@ -39,6 +39,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { sessionProcessJobEnv } from "../../process/sessionProcessJob.ts";
 import {
   buildCodexDeveloperInstructions,
   type T3CodeToolAvailability,
@@ -1328,7 +1329,7 @@ export const makeCodexSessionRuntime = (
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           cwd: options.cwd,
-          env,
+          env: { ...env, ...sessionProcessJobEnv },
           extendEnv,
           forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
           shell: spawnCommand.shell,
