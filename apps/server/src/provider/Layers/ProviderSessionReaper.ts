@@ -120,40 +120,30 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
-        // Last, ask the adapter itself. Its live session state is current
-        // even when the projection is not.
-        const live = (yield* providerService.listSessions()).find(
-          (session) => session.threadId === binding.threadId,
-        );
-        if (
-          live !== undefined &&
-          (live.status === "running" || live.status === "connecting" || live.activeTurnId != null)
-        ) {
-          yield* Effect.logInfo("provider.session.reaper.skipped-live-turn", {
-            threadId: binding.threadId,
-            liveStatus: live.status,
-            liveActiveTurnId: live.activeTurnId,
-            projectedStatus,
-            idleDurationMs,
-          });
-          continue;
-        }
-
-        const reaped = yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
-          Effect.tap(() =>
-            Effect.logInfo("provider.session.reaped", {
-              threadId: binding.threadId,
-              provider: binding.provider,
-              idleDurationMs,
-              reason: "inactivity_threshold",
-              lastSeenAt: binding.lastSeenAt,
-              projectedStatus,
-              projectedUpdatedAt: thread?.session?.updatedAt,
-              lastProviderEventAtMs: intake.lastEventAtMs,
-              liveStatus: live?.status ?? "none",
-            }),
+        // Last, the provider service checks the adapter's own live session
+        // and stops it only if idle, under the lock a turn start takes. Its
+        // state is current even when the projection is not.
+        const reaped = yield* providerService.stopIdleSession({ threadId: binding.threadId }).pipe(
+          Effect.tap((outcome) =>
+            outcome.stopped
+              ? Effect.logInfo("provider.session.reaped", {
+                  threadId: binding.threadId,
+                  provider: binding.provider,
+                  idleDurationMs,
+                  reason: "inactivity_threshold",
+                  lastSeenAt: binding.lastSeenAt,
+                  projectedStatus,
+                  projectedUpdatedAt: thread?.session?.updatedAt,
+                  lastProviderEventAtMs: intake.lastEventAtMs,
+                })
+              : Effect.logInfo("provider.session.reaper.skipped-live-session", {
+                  threadId: binding.threadId,
+                  reason: outcome.reason,
+                  projectedStatus,
+                  idleDurationMs,
+                }),
           ),
-          Effect.as(true),
+          Effect.map((outcome) => outcome.stopped),
           Effect.catchCause((cause) =>
             Effect.logWarning("provider.session.reaper.stop-failed", {
               threadId: binding.threadId,

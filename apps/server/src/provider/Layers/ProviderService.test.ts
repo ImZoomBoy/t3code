@@ -2973,6 +2973,80 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("does not stop an idle session while a turn is being handed to it", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-stop-idle-race");
+      const session = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const stopsBefore = routing.codex.stopSession.mock.calls.length;
+      const sendStarted = yield* Deferred.make<void>();
+      const releaseSend = yield* Deferred.make<void>();
+      const listSessions = routing.codex.listSessions.getMockImplementation();
+      let turnRunning = false;
+      routing.codex.listSessions.mockImplementation(() =>
+        Effect.succeed([turnRunning ? { ...session, status: "running" as const } : session]),
+      );
+      routing.codex.sendTurn.mockImplementationOnce(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(sendStarted, undefined);
+          yield* Deferred.await(releaseSend);
+          turnRunning = true;
+          return { threadId, turnId: asTurnId("turn-race") };
+        }),
+      );
+
+      const sendFiber = yield* provider
+        .sendTurn({ threadId, input: "start work", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(sendStarted);
+      // The adapter still reports the session idle here: the turn has not
+      // registered yet. A stop decided now must wait for the turn start.
+      const stopFiber = yield* provider.stopIdleSession({ threadId }).pipe(Effect.forkChild);
+      yield* Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true });
+      assert.equal(routing.codex.stopSession.mock.calls.length - stopsBefore, 0);
+
+      yield* Deferred.succeed(releaseSend, undefined);
+      yield* Fiber.join(sendFiber);
+      const outcome = yield* Fiber.join(stopFiber);
+      assert.deepEqual(outcome, { stopped: false, reason: "session running" });
+      assert.equal(routing.codex.stopSession.mock.calls.length - stopsBefore, 0);
+      if (listSessions) routing.codex.listSessions.mockImplementation(listSessions);
+    }),
+  );
+
+  it.effect("does not stop an idle session whose provider still runs background tasks", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-stop-idle-background");
+      const session = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const stopsBefore = routing.codex.stopSession.mock.calls.length;
+      const listSessions = routing.codex.listSessions.getMockImplementation();
+      routing.codex.listSessions.mockImplementation(() =>
+        Effect.succeed([{ ...session, status: "ready" as const, backgroundTaskCount: 2 }]),
+      );
+
+      const outcome = yield* provider.stopIdleSession({ threadId });
+
+      assert.deepEqual(outcome, { stopped: false, reason: "live background tasks" });
+      assert.equal(routing.codex.stopSession.mock.calls.length - stopsBefore, 0);
+
+      routing.codex.listSessions.mockImplementation(() => Effect.succeed([session]));
+      assert.deepEqual(yield* provider.stopIdleSession({ threadId }), { stopped: true });
+      assert.equal(routing.codex.stopSession.mock.calls.length - stopsBefore, 1);
+      if (listSessions) routing.codex.listSessions.mockImplementation(listSessions);
+    }),
+  );
+
   it.effect("does not persist running after a concurrent send is interrupted", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

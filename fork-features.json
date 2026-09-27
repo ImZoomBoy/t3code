@@ -458,41 +458,57 @@
     },
     {
       "name": "claude-turn-ends-on-its-own-result",
-      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. The requested turn now ends only on the result that echoes its prompt's uuid, not on the notice's result.",
-      "keep": "In ClaudeAdapter.ts resultAnswersTurn and its early return in handleResultMessage survive, and in ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
+      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. A requested turn now ends only on a result that echoes the uuid of a message sent into it: its prompt or any steer. Every steer is sent with its own uuid.",
+      "keep": "In ClaudeAdapter.ts these survive: resultAnswersTurn and its early return in handleResultMessage, the sentMessageUuids field of ClaudeTurnState, and the uuid sendTurn gives every message it queues. In ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
       "files": [
         "apps/server/src/provider/Layers/ClaudeAdapter.ts",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts"
       ],
       "test": "apps/server/src/provider/Layers/ClaudeAdapter.test.ts",
-      "testName": "ends a resumed turn on its own prompt's result",
+      "testName": "ends a resumed turn on its own prompt's result, not a queued task notice's",
       "patchesUpstream": true
     },
     {
       "name": "provider-intake-backlog",
-      "description": "Runtime ingestion records each provider event as it is queued and applied, per thread, in ProviderIntakeLag. The HTTP shell snapshot reports the backlog as providerIntake, so a client can tell its view is behind the provider. ProviderIntakeLag.ts is the fork's own module and upstream has no file at that path.",
-      "keep": "ProviderIntakeLag.ts is ours whole. These survive: the recordQueued and recordApplied calls in ProviderRuntimeIngestion.ts, ProviderIntakeLag.layer in runtimeLayer.ts, the providerIntake field built in the shellSnapshot handler of http.ts, ProviderIntakeBacklog and the optional providerIntake field of OrchestrationShellSnapshot in orchestration.ts, the ProviderIntakeLag.layer provided in server.test.ts and OrchestrationEngineHarness.integration.ts, and in ProviderRuntimeIngestion.test.ts the intakeGate harness option, the intakeLag and emitAndWaitForEnqueue harness members and the test named in testName. Everything else in those files takes upstream.",
+      "description": "Runtime ingestion records each provider event per thread in ProviderIntakeLag as it is queued and applied, and forgets a thread when its session ends or it is deleted. The HTTP shell snapshot and fleet_list_threads report the backlog. Shell subscriptions that ask for it receive provider-intake items naming the threads more than 5 seconds behind. client-runtime keeps the latest one on the shell snapshot, never in the cache, and the web sidebar labels such a row Catching up. ProviderIntakeLag.ts is the fork's own module and upstream has no file at that path.",
+      "keep": "ProviderIntakeLag.ts and ProviderIntakeLag.test.ts are ours whole. These survive: the recordQueued, recordApplied and forgetThread calls in ProviderRuntimeIngestion.ts; ProviderIntakeLag.layer in runtimeLayer.ts; the providerIntake field in the shellSnapshot handler of http.ts; the shellProviderIntake flag and the behindBacklogChanges merge in the subscribeShell handler of ws.ts; ProviderIntakeBacklog, the optional providerIntake field of OrchestrationShellSnapshot, the provider-intake item of OrchestrationShellStreamItem and requestProviderIntake in orchestration.ts; shellProviderIntake in server.ts; the providerIntake field in the fleet tools.ts and handlers.ts; latestIntake, withIntake, intakeRequest and the persist destructuring in client-runtime shell.ts; threadIntakeBehindSinceAtom in threadShell.ts; useThreadIntakeBehindSince in web entities.ts and the catchingUp status in Sidebar.tsx; ProviderIntakeLag.layer in server.test.ts and OrchestrationEngineHarness.integration.ts; and the tests that exercise them. Everything else in those files takes upstream.",
       "files": [
         "apps/server/src/orchestration/ProviderIntakeLag.ts",
+        "apps/server/src/orchestration/ProviderIntakeLag.test.ts",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts",
         "apps/server/src/orchestration/runtimeLayer.ts",
         "apps/server/src/orchestration/http.ts",
+        "apps/server/src/ws.ts",
         "packages/contracts/src/orchestration.ts",
+        "packages/contracts/src/server.ts",
+        "apps/server/src/mcp/toolkits/fleet/tools.ts",
+        "apps/server/src/mcp/toolkits/fleet/handlers.ts",
+        "apps/server/src/mcp/toolkits/fleet/handlers.test.ts",
+        "packages/client-runtime/src/state/shell.ts",
+        "packages/client-runtime/src/state/shell-sync.test.ts",
+        "packages/client-runtime/src/state/threadShell.ts",
+        "packages/client-runtime/src/state/entities.test.ts",
+        "apps/web/src/state/entities.ts",
+        "apps/web/src/components/Sidebar.tsx",
         "apps/server/src/server.test.ts",
         "apps/server/integration/OrchestrationEngineHarness.integration.ts",
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts"
       ],
-      "test": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts",
-      "testName": "reports a thread's queued provider events until they are applied",
+      "test": "apps/server/src/orchestration/ProviderIntakeLag.test.ts",
       "patchesUpstream": true
     },
     {
       "name": "reaper-spares-busy-sessions",
-      "description": "The provider session reaper never stops a session whose projection shows it starting or running, whose provider events are still queued, whose last provider event is recent, or whose adapter reports it mid-turn. It asks the adapter last, just before stopping, and logs the evidence it stopped on.",
-      "keep": "In ProviderSessionReaper.ts the intake backlog check, the last provider event in lastActivityMs, the starting and running status check, the live adapter session check and the extra fields on the provider.session.reaped log survive. In ProviderSessionReaper.test.ts the liveSessions harness option, ProviderIntakeLag.layer in the harness and the describe block named in testName survive. Everything else in those files takes upstream.",
+      "description": "The provider session reaper never stops a session whose projection shows it starting or running, whose provider events are still queued, or whose last provider event is recent. It stops through ProviderService.stopIdleSession, which checks the adapter's live session under the same per-thread lock sendTurn holds, and refuses a session that is running, connecting, mid-turn or running background tasks. The Claude adapter reports its live background task count on its session.",
+      "keep": "In ProviderSessionReaper.ts the intake backlog check, the last provider event in lastActivityMs, the starting and running status check, the stopIdleSession call and its logs survive. In ProviderService.ts (Layers) withThreadLock, its use in sendTurn and stopIdleSession survive; in ProviderService.ts (Services) stopIdleSession and providerSessionBusyReason survive. backgroundTaskCount survives in contracts provider.ts and in ClaudeAdapter.ts listSessions. The stopIdleSession stubs in test mocks survive. In ProviderSessionReaper.test.ts the liveSessions option, the stopIdleSession mock, ProviderIntakeLag.layer and the describe block named in testName survive. Everything else in those files takes upstream.",
       "files": [
         "apps/server/src/provider/Layers/ProviderSessionReaper.ts",
-        "apps/server/src/provider/Layers/ProviderSessionReaper.test.ts"
+        "apps/server/src/provider/Layers/ProviderSessionReaper.test.ts",
+        "apps/server/src/provider/Layers/ProviderService.ts",
+        "apps/server/src/provider/Services/ProviderService.ts",
+        "apps/server/src/provider/Layers/ProviderService.test.ts",
+        "packages/contracts/src/provider.ts",
+        "apps/server/src/provider/Layers/ClaudeAdapter.ts"
       ],
       "test": "apps/server/src/provider/Layers/ProviderSessionReaper.test.ts",
       "testName": "never stops a session whose view is behind its provider",
@@ -507,7 +523,7 @@
         "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts"
       ],
       "test": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts",
-      "testName": "not completed",
+      "testName": "records a turn the provider ended as",
       "patchesUpstream": true
     },
     {

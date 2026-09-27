@@ -14,8 +14,12 @@
  * @module ProviderIntakeLagService
  */
 import * as Context from "effect/Context";
+import { type ProviderIntakeBacklog, ThreadId } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 
 export interface ThreadIntakeLag {
   readonly pendingEvents: number;
@@ -25,16 +29,6 @@ export interface ThreadIntakeLag {
   readonly lastEventAtMs: number | null;
 }
 
-export interface IntakeLagSnapshot {
-  readonly pendingEvents: number;
-  readonly oldestPendingAtMs: number | null;
-  readonly threads: ReadonlyArray<{
-    readonly threadId: string;
-    readonly pendingEvents: number;
-    readonly oldestPendingAtMs: number;
-  }>;
-}
-
 export class ProviderIntakeLagService extends Context.Service<
   ProviderIntakeLagService,
   {
@@ -42,8 +36,20 @@ export class ProviderIntakeLagService extends Context.Service<
     readonly recordQueued: (threadId: string, atMs: number) => void;
     /** The oldest queued event for the thread was applied. */
     readonly recordApplied: (threadId: string) => void;
+    /**
+     * The thread's session ended or the thread was deleted: drop its last
+     * event time. Events still queued keep their own entries until applied.
+     */
+    readonly forgetThread: (threadId: string) => void;
     readonly forThread: (threadId: string) => ThreadIntakeLag;
-    readonly snapshot: () => IntakeLagSnapshot;
+    /**
+     * The backlog in its wire shape. With `behindForMs`, only threads whose
+     * oldest queued event has waited that long at `nowMs`.
+     */
+    readonly snapshot: (options?: {
+      readonly behindForMs: number;
+      readonly nowMs: number;
+    }) => ProviderIntakeBacklog;
   }
 >()("t3/orchestration/ProviderIntakeLag/ProviderIntakeLagService") {}
 
@@ -66,6 +72,9 @@ function make(): ProviderIntakeLagService["Service"] {
       pending.shift();
       if (pending.length === 0) pendingByThreadId.delete(threadId);
     },
+    forgetThread: (threadId) => {
+      lastEventAtByThreadId.delete(threadId);
+    },
     forThread: (threadId) => {
       const pending = pendingByThreadId.get(threadId);
       return {
@@ -74,20 +83,52 @@ function make(): ProviderIntakeLagService["Service"] {
         lastEventAtMs: lastEventAtByThreadId.get(threadId) ?? null,
       };
     },
-    snapshot: () => {
+    snapshot: (options) => {
+      const iso = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
       const threads = Array.from(pendingByThreadId, ([threadId, pending]) => ({
         threadId,
         pendingEvents: pending.length,
         oldestPendingAtMs: pending[0]!,
-      }));
+      })).filter(
+        (thread) =>
+          options === undefined || options.nowMs - thread.oldestPendingAtMs >= options.behindForMs,
+      );
+      const oldestPendingAtMs =
+        threads.length === 0 ? null : Math.min(...threads.map((t) => t.oldestPendingAtMs));
       return {
         pendingEvents: threads.reduce((sum, thread) => sum + thread.pendingEvents, 0),
-        oldestPendingAtMs:
-          threads.length === 0 ? null : Math.min(...threads.map((t) => t.oldestPendingAtMs)),
-        threads,
+        oldestPendingAt: oldestPendingAtMs === null ? null : iso(oldestPendingAtMs),
+        threads: threads.map((thread) => ({
+          threadId: ThreadId.make(thread.threadId),
+          pendingEvents: thread.pendingEvents,
+          oldestPendingAt: iso(thread.oldestPendingAtMs),
+        })),
       };
     },
   };
 }
 
 export const layer = Layer.effect(ProviderIntakeLagService, Effect.sync(make));
+
+/** A thread counts as behind once its oldest queued event has waited this long. */
+const BEHIND_FOR_MS = 5_000;
+
+/**
+ * The shell stream's provider-intake items: the threads that are behind, once
+ * at once and then whenever that set or its oldest waiting times change. A
+ * healthy intake sends one empty item and nothing more.
+ */
+export const behindBacklogChanges = (lag: ProviderIntakeLagService["Service"]) =>
+  Stream.tick("2 seconds").pipe(
+    Stream.mapEffect(() =>
+      Clock.currentTimeMillis.pipe(
+        Effect.map((nowMs) => lag.snapshot({ behindForMs: BEHIND_FOR_MS, nowMs })),
+      ),
+    ),
+    Stream.changesWith((previous, next) => backlogKey(previous) === backlogKey(next)),
+    Stream.map((backlog) => ({ kind: "provider-intake" as const, backlog })),
+  );
+
+function backlogKey(backlog: ProviderIntakeBacklog): string {
+  return backlog.threads.map((thread) => `${thread.threadId}@${thread.oldestPendingAt}`).join(",");
+}

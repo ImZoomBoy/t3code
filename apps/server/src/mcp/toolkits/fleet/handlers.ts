@@ -1,7 +1,12 @@
-import type { McpCapabilityUnavailableError, OrchestrationShellSnapshot } from "@t3tools/contracts";
+import type {
+  McpCapabilityUnavailableError,
+  OrchestrationShellSnapshot,
+  ProviderIntakeBacklog,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderIntakeLag from "../../../orchestration/ProviderIntakeLag.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { FleetToolkit, type FleetThreadIdentity, type FleetThreadSummary } from "./tools.ts";
 
@@ -10,14 +15,28 @@ import { FleetToolkit, type FleetThreadIdentity, type FleetThreadSummary } from 
  * model's own record of archival, so live and archived snapshots can be
  * summarised by the same code.
  */
-const summarize = (snapshot: OrchestrationShellSnapshot): ReadonlyArray<FleetThreadSummary> =>
-  snapshot.threads.map((thread) => ({
-    threadId: thread.id,
-    projectId: thread.projectId,
-    title: thread.title,
-    archived: thread.archivedAt !== null,
-    updatedAt: thread.updatedAt,
-  }));
+const summarize = (
+  snapshot: OrchestrationShellSnapshot,
+  backlog: ProviderIntakeBacklog,
+): ReadonlyArray<FleetThreadSummary> =>
+  snapshot.threads.map((thread) => {
+    const behind = backlog.threads.find((entry) => entry.threadId === thread.id);
+    return {
+      threadId: thread.id,
+      projectId: thread.projectId,
+      title: thread.title,
+      archived: thread.archivedAt !== null,
+      updatedAt: thread.updatedAt,
+      ...(behind === undefined
+        ? {}
+        : {
+            providerIntake: {
+              pendingEvents: behind.pendingEvents,
+              oldestPendingAt: behind.oldestPendingAt,
+            },
+          }),
+    };
+  });
 
 /**
  * Answers with the calling thread's identity. The scope is the server's own
@@ -39,7 +58,9 @@ export const whoami = Effect.fn("FleetToolkit.whoami")(function* (): Effect.fn.R
 export const listThreads = Effect.fn("FleetToolkit.listThreads")(function* (): Effect.fn.Return<
   { readonly threads: ReadonlyArray<FleetThreadSummary> },
   McpCapabilityUnavailableError,
-  McpInvocationContext.McpInvocationContext | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+  | McpInvocationContext.McpInvocationContext
+  | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+  | ProviderIntakeLag.ProviderIntakeLagService
 > {
   yield* McpInvocationContext.requireMcpCapability("fleet");
   const query = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -47,7 +68,9 @@ export const listThreads = Effect.fn("FleetToolkit.listThreads")(function* (): E
     [query.getShellSnapshot(), query.getArchivedShellSnapshot()],
     { concurrency: 2 },
   ).pipe(Effect.orDie);
-  return { threads: [...summarize(live), ...summarize(archived)] };
+  // Read after the snapshots, so it covers every event they are missing.
+  const backlog = (yield* ProviderIntakeLag.ProviderIntakeLagService).snapshot();
+  return { threads: [...summarize(live, backlog), ...summarize(archived, backlog)] };
 });
 
 const handlers = {

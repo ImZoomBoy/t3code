@@ -1808,6 +1808,123 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("reports live background tasks on its session until they end", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const nextEvent = (type: "task.started" | "task.completed") =>
+        adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === type),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+      const liveCount = adapter
+        .listSessions()
+        .pipe(
+          Effect.map(
+            (sessions) =>
+              sessions.find((entry) => entry.threadId === session.threadId)?.backgroundTaskCount,
+          ),
+        );
+
+      const started = yield* nextEvent("task.started");
+      harness.query.emit({
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-shell",
+        description: "sleep 900",
+        task_type: "local_bash",
+        is_backgrounded: true,
+        uuid: "task-shell-started",
+        session_id: "sdk-session-background",
+      } as unknown as SDKMessage);
+      yield* Fiber.join(started);
+      assert.equal(yield* liveCount, 1);
+
+      const completed = yield* nextEvent("task.completed");
+      harness.query.emit({
+        type: "system",
+        subtype: "task_notification",
+        task_id: "task-shell",
+        status: "completed",
+        output_file: "",
+        summary: "done",
+        uuid: "task-shell-done",
+        session_id: "sdk-session-background",
+      } as unknown as SDKMessage);
+      yield* Fiber.join(completed);
+      assert.equal(yield* liveCount, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("ends a turn on the result of a message steered into it", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "run 5 commands",
+        attachments: [],
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "actually run 15",
+        attachments: [],
+      });
+      const [, steer] = yield* Effect.promise(() =>
+        readPromptMessages(harness.getLastCreateQueryInput(), 2),
+      );
+      // The CLI can run a queued steer as the turn that answers, echoing only
+      // the steer's uuid (one it mints itself when the host sent none).
+      const steerUuid = steer?.uuid ?? "cli-minted-steer-uuid";
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        num_turns: 1,
+        user_message_uuid: steerUuid,
+        user_message_uuids: [steerUuid],
+        session_id: "sdk-session-steer-echo",
+        uuid: "result-steer-echo",
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const completed = runtimeEvents.filter((event) => event.type === "turn.completed");
+      assert.deepEqual(
+        completed.map((event) => String(event.turnId)),
+        [String(turn.turnId)],
+      );
+      if (completed[0]?.type === "turn.completed") {
+        assert.equal(completed[0].payload.state, "completed");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("maps Claude reasoning deltas, streamed tool inputs, and tool results", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

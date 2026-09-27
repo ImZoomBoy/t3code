@@ -24,7 +24,11 @@ import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderSessionReaper } from "../Services/ProviderSessionReaper.ts";
-import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import {
+  ProviderService,
+  providerSessionBusyReason,
+  type ProviderServiceShape,
+} from "../Services/ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import { makeProviderSessionReaperLive } from "./ProviderSessionReaper.ts";
 
@@ -202,6 +206,14 @@ describe("ProviderSessionReaper", () => {
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession,
+      // Mirrors the real check: refuse when the adapter's live session is busy.
+      stopIdleSession: (request) => {
+        const live = input.liveSessions?.find((session) => session.threadId === request.threadId);
+        const reason = live === undefined ? undefined : providerSessionBusyReason(live);
+        return reason === undefined
+          ? stopSession(request).pipe(Effect.as({ stopped: true } as const))
+          : Effect.succeed({ stopped: false, reason } as const);
+      },
       listSessions: () => Effect.succeed([...(input.liveSessions ?? [])]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       assertConversationRollbackSupported: () => unsupported(),
@@ -497,6 +509,16 @@ describe("ProviderSessionReaper", () => {
 
     it("skips a session its adapter reports mid-turn", async () => {
       const harness = await sweepStale({ projectedStatus: "ready", liveSessions: [liveTurn] });
+      expect(harness.stopSession).not.toHaveBeenCalled();
+    });
+
+    it("skips a session whose adapter still runs background tasks with no turn", async () => {
+      const harness = await sweepStale({
+        projectedStatus: "ready",
+        liveSessions: [
+          { ...liveTurn, status: "ready", activeTurnId: undefined, backgroundTaskCount: 1 },
+        ],
+      });
       expect(harness.stopSession).not.toHaveBeenCalled();
     });
 

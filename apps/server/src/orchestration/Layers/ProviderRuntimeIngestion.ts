@@ -2698,7 +2698,12 @@ const make = Effect.gen(function* () {
       logIngestionFailure(input.source, input.event),
       Effect.ensuring(
         input.source === "runtime"
-          ? Effect.sync(() => intakeLag.recordApplied(input.event.threadId))
+          ? Effect.sync(() => {
+              intakeLag.recordApplied(input.event.threadId);
+              if (input.event.type === "session.exited") {
+                intakeLag.forgetThread(input.event.threadId);
+              }
+            })
           : Effect.void,
       ),
     ),
@@ -2736,6 +2741,9 @@ const make = Effect.gen(function* () {
       );
       yield* forkParked(
         Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+          if (event.type === "thread.deleted") {
+            return Effect.sync(() => intakeLag.forgetThread(event.payload.threadId));
+          }
           if (event.type !== "thread.turn-start-requested") {
             return Effect.void;
           }

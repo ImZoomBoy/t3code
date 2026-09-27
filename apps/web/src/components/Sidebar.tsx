@@ -141,6 +141,7 @@ import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
   useProjects,
+  useThreadIntakeBehindSince,
   useThreadShells,
 } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
@@ -1163,6 +1164,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // switching sidebars must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
+  // The server has provider events for this thread it has not applied yet,
+  // so the status below may be stale. Asks for a decision still show.
+  const intakeBehindSince = useThreadIntakeBehindSince({
+    environmentId: thread.environmentId,
+    threadId: thread.id,
+  });
+  const catchingUp =
+    intakeBehindSince !== null &&
+    status !== "approval" &&
+    status !== "input" &&
+    status !== "failed";
   // A woken thread reappears at its original position (the sort is
   // deliberately static), so the pill has to carry the weight. Snoozing is
   // an explicit act, so the pill clears only when the user re-engages:
@@ -1189,8 +1201,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
-  const topStatus =
-    status === "working"
+  const topStatus = catchingUp
+    ? {
+        label: "Catching up",
+        icon: "working" as const,
+        className: "text-muted-foreground",
+      }
+    : status === "working"
       ? {
           label: "Working",
           icon: "working" as const,

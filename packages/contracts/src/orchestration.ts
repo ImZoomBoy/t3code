@@ -1020,7 +1020,9 @@ export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
 /**
  * Provider events the server has received but not yet applied to the
- * projection. A thread listed here shows state older than its provider.
+ * projection. A thread listed here shows state older than its provider. The
+ * HTTP shell snapshot lists every thread with a queued event; the shell stream
+ * lists only threads more than a few seconds behind.
  */
 export const ProviderIntakeBacklog = Schema.Struct({
   pendingEvents: NonNegativeInt,
@@ -1076,6 +1078,11 @@ export const OrchestrationShellStreamItem = Schema.Union([
     kind: Schema.Literal("snapshot"),
     snapshot: OrchestrationShellSnapshot,
   }),
+  /** Sent only to subscribers that set requestProviderIntake. */
+  Schema.Struct({
+    kind: Schema.Literal("provider-intake"),
+    backlog: ProviderIntakeBacklog,
+  }),
   OrchestrationShellStreamEvent,
 ]);
 export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.Type;
@@ -1095,6 +1102,11 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
    * snapshot or catch-up replay and before it begins emitting live events.
    */
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Requests provider-intake items: the threads whose view is behind their
+   * provider, sent at subscription start and whenever that set changes.
+   */
+  requestProviderIntake: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 

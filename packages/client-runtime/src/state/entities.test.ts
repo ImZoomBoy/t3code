@@ -284,6 +284,52 @@ describe("environment entity projections", () => {
     expect(harness.registry.get(threadAtom)).toBe(thread);
   });
 
+  it("reports only its own thread as behind while the server says so", () => {
+    const harness = makeHarness();
+    const behindAtom = harness.threadShells.threadIntakeBehindSinceAtom({
+      environmentId: ENVIRONMENT_ID,
+      threadId: THREAD_ID,
+    });
+    const otherAtom = harness.threadShells.threadIntakeBehindSinceAtom({
+      environmentId: ENVIRONMENT_ID,
+      threadId: OTHER_THREAD_ID,
+    });
+    expect(harness.registry.get(behindAtom)).toBeNull();
+
+    harness.registry.set(
+      harness.shellStateAtom,
+      AsyncResult.success(
+        shellState({
+          ...SNAPSHOT,
+          providerIntake: {
+            pendingEvents: 4,
+            oldestPendingAt: "2026-03-09T12:00:00.000Z",
+            threads: [
+              {
+                threadId: THREAD_ID,
+                pendingEvents: 4,
+                oldestPendingAt: "2026-03-09T12:00:00.000Z",
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    expect(harness.registry.get(behindAtom)).toBe("2026-03-09T12:00:00.000Z");
+    expect(harness.registry.get(otherAtom)).toBeNull();
+
+    harness.registry.set(
+      harness.shellStateAtom,
+      AsyncResult.success(
+        shellState({
+          ...SNAPSHOT,
+          providerIntake: { pendingEvents: 0, oldestPendingAt: null, threads: [] },
+        }),
+      ),
+    );
+    expect(harness.registry.get(behindAtom)).toBeNull();
+  });
+
   it("preserves project-scoped thread collections across unrelated project updates", () => {
     const harness = makeHarness();
     const projectRef = {

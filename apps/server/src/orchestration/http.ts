@@ -2,9 +2,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
-  ThreadId,
 } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
@@ -70,21 +68,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
             );
           // Read after the snapshot, so a backlog it reports covers every
           // event the snapshot is missing.
-          const backlog = intakeLag.snapshot();
-          const iso = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
-          return {
-            ...snapshot,
-            providerIntake: {
-              pendingEvents: backlog.pendingEvents,
-              oldestPendingAt:
-                backlog.oldestPendingAtMs === null ? null : iso(backlog.oldestPendingAtMs),
-              threads: backlog.threads.map((thread) => ({
-                threadId: ThreadId.make(thread.threadId),
-                pendingEvents: thread.pendingEvents,
-                oldestPendingAt: iso(thread.oldestPendingAtMs),
-              })),
-            },
-          };
+          return { ...snapshot, providerIntake: intakeLag.snapshot() };
         }),
       )
       .handle(

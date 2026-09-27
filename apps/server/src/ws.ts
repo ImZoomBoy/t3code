@@ -103,6 +103,7 @@ import {
 } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderIntakeLag from "./orchestration/ProviderIntakeLag.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
@@ -510,6 +511,7 @@ const makeWsRpcLayer = (
       const crypto = yield* Crypto.Crypto;
       const sql = yield* SqlClient.SqlClient;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+      const intakeLag = yield* ProviderIntakeLag.ProviderIntakeLagService;
       /** A reference's host-level link key; the project's own host where the ref names none. */
       const resolvePullRequestSyncKey = (reference: PullRequestRef) =>
         reference.host !== undefined && reference.repository.includes("/")
@@ -1870,6 +1872,7 @@ const makeWsRpcLayer = (
             },
             settings,
             shellResumeCompletionMarker: true,
+            shellProviderIntake: true,
             ...(fileManagerRevealKind === undefined
               ? {}
               : {
@@ -2181,7 +2184,17 @@ const makeWsRpcLayer = (
                 }),
                 synchronizedThenLive,
               );
-            }),
+            }).pipe(
+              // Opted-in clients also hear which threads' views are behind
+              // their provider. It ends with the shell stream.
+              Effect.map((shellStream) =>
+                input.requestProviderIntake === true
+                  ? Stream.merge(shellStream, ProviderIntakeLag.behindBacklogChanges(intakeLag), {
+                      haltStrategy: "left",
+                    })
+                  : shellStream,
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: (_input) =>
