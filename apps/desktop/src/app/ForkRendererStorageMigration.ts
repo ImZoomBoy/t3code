@@ -23,7 +23,7 @@ export type StorageEntries = ReadonlyArray<readonly [string, string]>;
  * MAX_MIGRATION_ATTEMPTS failures, so a lasting fault cannot delay every launch.
  */
 export const MIGRATION_MARKER_FILE = "fork-renderer-storage-migrated";
-export const MAX_MIGRATION_ATTEMPTS = 3;
+const MAX_MIGRATION_ATTEMPTS = 3;
 
 const MIGRATION_TIMEOUT = Duration.seconds(10);
 const BLANK_PAGE = "<!doctype html><title></title>";
@@ -57,7 +57,7 @@ export type ForkRendererStorageMigrationResult =
   | { readonly _tag: "Copied"; readonly copied: number; readonly skipped: number };
 
 /** How many launches have failed so far, or "copied" once the copy is done. */
-export function parseMigrationMarker(text: string | undefined) {
+function parseMigrationMarker(text: string | undefined) {
   const line = text?.trim() ?? "";
   if (line === "copied") return "copied";
   const failed = /^failed (\d+)$/.exec(line);
