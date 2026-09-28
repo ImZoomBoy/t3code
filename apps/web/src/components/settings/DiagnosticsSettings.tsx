@@ -29,6 +29,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -718,6 +719,9 @@ export function DiagnosticsSettingsPanel() {
   const environmentId = environment?.environmentId ?? null;
   const observability = environment?.serverConfig?.observability;
   const availableEditors = environment?.serverConfig?.availableEditors;
+  const sessionJobsIssue = environment?.serverConfig?.issues.find(
+    (issue) => issue.kind === "processes.session-jobs-unavailable",
+  );
   const signalServerProcess = useAtomCommand(serverEnvironment.signalProcess, {
     reportFailure: false,
   });
@@ -909,6 +913,13 @@ export function DiagnosticsSettingsPanel() {
 
   return (
     <SettingsPageContainer width="expanded" className="gap-10">
+      {sessionJobsIssue ? (
+        <Alert variant="warning">
+          <AlertTriangleIcon />
+          <AlertTitle>Session processes may outlive their sessions</AlertTitle>
+          <AlertDescription>{sessionJobsIssue.message}</AlertDescription>
+        </Alert>
+      ) : null}
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection

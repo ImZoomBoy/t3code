@@ -3,6 +3,7 @@ import {
   type EnvironmentId,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamItem,
+  type ProviderIntakeBacklog,
   type ServerConfig,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -72,13 +73,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     error: Option.none(),
   });
   const awaitingCompletion = yield* Ref.make(false);
+  // The last provider-intake item from this server. It is laid onto every
+  // snapshot the stream delivers, and is never cached: a stale backlog would
+  // mark threads behind after a restart.
+  const latestIntake = yield* Ref.make<ProviderIntakeBacklog | undefined>(undefined);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
   const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
   const persistence = yield* Queue.sliding<OrchestrationShellSnapshot>(1);
 
-  const persist = Effect.fn("EnvironmentShellState.persist")(function* (
-    snapshot: OrchestrationShellSnapshot,
-  ) {
+  const persist = Effect.fn("EnvironmentShellState.persist")(function* ({
+    providerIntake: _providerIntake,
+    ...snapshot
+  }: OrchestrationShellSnapshot) {
     yield* cache.saveShell(environmentId, snapshot).pipe(
       Effect.catch((error) =>
         Effect.logWarning("Could not persist environment shell cache.").pipe(
@@ -145,7 +151,19 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     let waiting = yield* Ref.get(awaitingCompletion);
     let next = initial;
     let receivedSnapshot = false;
+    let intake = yield* Ref.get(latestIntake);
+    const withIntake = (snapshot: OrchestrationShellSnapshot): OrchestrationShellSnapshot => {
+      const { providerIntake: _providerIntake, ...rest } = snapshot;
+      return intake === undefined ? rest : { ...rest, providerIntake: intake };
+    };
     for (const item of items) {
+      if (item.kind === "provider-intake") {
+        intake = item.backlog;
+        if (Option.isSome(next.snapshot)) {
+          next = { ...next, snapshot: Option.some(withIntake(next.snapshot.value)) };
+        }
+        continue;
+      }
       if (item.kind === "synchronized") {
         waiting = false;
         if (Option.isSome(next.snapshot)) {
@@ -155,7 +173,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       }
       const nextSnapshot =
         item.kind === "snapshot"
-          ? item.snapshot
+          ? withIntake(item.snapshot)
           : Option.match(next.snapshot, {
               onNone: () => null,
               onSome: (snapshot) =>
@@ -172,6 +190,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       };
     }
     yield* Ref.set(awaitingCompletion, waiting);
+    yield* Ref.set(latestIntake, intake);
     if (next === initial) return;
     yield* SubscriptionRef.set(state, next);
     if (receivedSnapshot) {
@@ -202,6 +221,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           Effect.orElseSucceed(() => false),
         );
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
+        const intakeRequest = (yield* session.initialConfig.pipe(
+          Effect.map((config) => config.shellProviderIntake === true),
+          Effect.orElseSucceed(() => false),
+        ))
+          ? { requestProviderIntake: true as const }
+          : {};
+        yield* Ref.set(latestIntake, undefined);
         yield* setSynchronizing;
 
         // Foreground resubscriptions on the same live session can resume from
@@ -236,7 +262,10 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         // If the authoritative refresh failed, omit the cached cursor so the
         // socket fallback sends a complete snapshot for this new session.
         if (!canResume || Option.isNone(current.snapshot)) {
-          return supportsCompletionMarker ? { requestCompletionMarker: true as const } : {};
+          return {
+            ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
+            ...intakeRequest,
+          };
         }
         if (!supportsCompletionMarker) {
           // Without a completion marker there is no synchronized signal for a
@@ -250,6 +279,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         return {
           afterSequence: current.snapshot.value.snapshotSequence,
           ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
+          ...intakeRequest,
         };
       }),
       {

@@ -8,17 +8,21 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { afterEach, describe, expect } from "vite-plus/test";
 
 import * as AcpSessionRuntime from "../provider/acp/AcpSessionRuntime.ts";
+import { OpenCodeRuntime, OpenCodeRuntimeLive } from "../provider/opencodeRuntime.ts";
 import {
   installSessionProcessJobs,
   restoreSessionProcessJobs,
   SESSION_PROCESS_JOB_ENV,
   sessionProcessJobEnv,
+  sessionProcessJobsIssues,
+  sessionProcessJobsUnavailable,
 } from "./sessionProcessJob.ts";
 
 const fixture = NodePath.join(
@@ -82,8 +86,39 @@ const makeTreeDir = () => {
   return dir;
 };
 
+type InternalSpawn = (
+  this: unknown,
+  options: { readonly envPairs?: ReadonlyArray<string> },
+) => unknown;
+const spawnTarget = NodeChildProcess.ChildProcess.prototype as unknown as {
+  spawn: InternalSpawn;
+};
+let unstall: (() => void) | undefined;
+
+/**
+ * Blocks this thread for `ms` right after the spawn whose environment holds
+ * `envPair` has started its process, as a busy server would. Installed below
+ * the hook, so the process runs unassigned for that long.
+ */
+const stallSpawnOf = (envPair: string, ms: number, afterStall: () => void) => {
+  const original = spawnTarget.spawn;
+  spawnTarget.spawn = function stalledSpawn(options) {
+    const result = original.call(this, options);
+    if (options.envPairs?.includes(envPair)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      afterStall();
+    }
+    return result;
+  };
+  unstall = () => {
+    spawnTarget.spawn = original;
+  };
+};
+
 afterEach(() => {
   restoreSessionProcessJobs();
+  unstall?.();
+  unstall = undefined;
   // Only processes this file started, by the pids they recorded.
   for (const dir of started.splice(0)) {
     for (const pid of readTree(dir).values()) {
@@ -93,45 +128,66 @@ afterEach(() => {
   }
 });
 
+const runMarked = (env: NodeJS.ProcessEnv) =>
+  new Promise<{ pid: number; seen: string }>((resolve, reject) => {
+    const child = NodeChildProcess.spawn(
+      process.execPath,
+      ["-e", `process.stdout.write(String(process.env.${SESSION_PROCESS_JOB_ENV}))`],
+      { env },
+    );
+    let seen = "";
+    child.stdout.on("data", (chunk) => (seen += chunk));
+    child.on("error", reject);
+    child.on("close", () => resolve({ pid: child.pid!, seen }));
+  });
+
 describe("session process jobs", () => {
   it("gives a marked spawn a job, hides the mark, and ends the job when the process exits", async () => {
     const created: Array<number> = [];
     const ended: Array<number> = [];
-    installSessionProcessJobs("win32", (pid) => {
+    installSessionProcessJobs("win32", () => (pid) => {
       created.push(pid);
       return { end: () => ended.push(pid) };
     });
 
-    const run = (env: NodeJS.ProcessEnv) =>
-      new Promise<{ pid: number; seen: string }>((resolve, reject) => {
-        const child = NodeChildProcess.spawn(
-          process.execPath,
-          ["-e", `process.stdout.write(String(process.env.${SESSION_PROCESS_JOB_ENV}))`],
-          { env },
-        );
-        let seen = "";
-        child.stdout.on("data", (chunk) => (seen += chunk));
-        child.on("error", reject);
-        child.on("close", () => resolve({ pid: child.pid!, seen }));
-      });
-
-    const marked = await run({ ...process.env, ...sessionProcessJobEnv });
+    const marked = await runMarked({ ...process.env, ...sessionProcessJobEnv });
     expect(marked.seen).toBe("undefined");
     expect(created).toEqual([marked.pid]);
     expect(ended).toEqual([marked.pid]);
 
-    await run(process.env);
+    await runMarked(process.env);
     expect(created).toEqual([marked.pid]);
+  });
+
+  it("says why when the native binding does not load, and still hides the mark", async () => {
+    expect(
+      installSessionProcessJobs("win32", () => {
+        throw new Error("Cannot find module 'ffi-rs'");
+      }),
+    ).toBe(true);
+    expect(sessionProcessJobsUnavailable()).toBe("Cannot find module 'ffi-rs'");
+    expect(sessionProcessJobsIssues()).toEqual([
+      {
+        kind: "processes.session-jobs-unavailable",
+        message:
+          "Processes that agents start may keep running after their session stops. The Windows process cleanup did not load: Cannot find module 'ffi-rs'",
+      },
+    ]);
+
+    const marked = await runMarked({ ...process.env, ...sessionProcessJobEnv });
+    expect(marked.seen).toBe("undefined");
   });
 
   it("is not installed off Windows", () => {
     expect(installSessionProcessJobs("linux")).toBe(false);
     expect(installSessionProcessJobs("darwin")).toBe(false);
+    expect(sessionProcessJobsUnavailable()).toBeUndefined();
+    expect(sessionProcessJobsIssues()).toEqual([]);
   });
 
   // Source checks, because an upstream merge that drops one of these lines
   // leaves every other test green and that provider's trees running again.
-  // Only the ACP spawn is exercised end to end below.
+  // Only the ACP and OpenCode spawns are exercised end to end below.
   it("is installed by the server entry point and marked by every session spawn", () => {
     const read = (relative: string) =>
       NodeFS.readFileSync(NodePath.join(import.meta.dirname, "..", relative), "utf8");
@@ -150,6 +206,11 @@ describe("session process jobs", () => {
   describe.runIf(HostProcessPlatform.defaultValue() === "win32")(
     "on Windows, with real processes",
     () => {
+      it("loads the native binding", () => {
+        expect(installSessionProcessJobs()).toBe(true);
+        expect(sessionProcessJobsUnavailable()).toBeUndefined();
+      });
+
       it.live("a stopped session ends its provider, its child and its grandchild", () =>
         Effect.gen(function* () {
           installSessionProcessJobs();
@@ -172,6 +233,73 @@ describe("session process jobs", () => {
 
           expect(yield* survivorsOf(tree)).toEqual([]);
         }).pipe(Effect.provide(NodeServices.layer)),
+      );
+
+      it.live("a process the provider starts before it has a job still ends with the session", () =>
+        Effect.gen(function* () {
+          const dir = makeTreeDir();
+          // The server stalls for 1.5 s right after the spawn, so the provider
+          // starts its shell before the hook can give the provider a job. The
+          // shell then waits 3 s before it starts the dev server and exits.
+          let shellBeforeJob = false;
+          stallSpawnOf(`SESSION_TREE_DIR=${dir}`, 1_500, () => {
+            shellBeforeJob = readTree(dir).has("shell");
+          });
+          installSessionProcessJobs();
+          const session = yield* Scope.make();
+          yield* AcpSessionRuntime.make({
+            spawn: {
+              command: process.execPath,
+              args: [fixture, "provider"],
+              env: { SESSION_TREE_DIR: dir, SESSION_TREE_SHELL_DELAY_MS: "3000" },
+            },
+            cwd: dir,
+            clientInfo: { name: "t3-test", version: "0.0.0" },
+            authMethodId: "test",
+          }).pipe(Scope.provide(session));
+          const tree = yield* waitForTree(dir, ALL);
+          expect(shellBeforeJob).toBe(true);
+
+          yield* Scope.close(session, Exit.void);
+
+          expect(yield* survivorsOf(tree)).toEqual([]);
+        }).pipe(Effect.provide(NodeServices.layer)),
+      );
+
+      it.live("each OpenCode session's server ends its own tree and leaves the other's", () =>
+        Effect.gen(function* () {
+          installSessionProcessJobs();
+          const runtime = yield* OpenCodeRuntime;
+          // An npm-style shim, as `opencode` is installed on Windows.
+          const binaryPath = NodePath.join(makeTreeDir(), "opencode.cmd");
+          NodeFS.writeFileSync(
+            binaryPath,
+            `@echo off\r\n"${process.execPath}" "${fixture}" opencode %*\r\n`,
+          );
+          const startSession = (dir: string) =>
+            Effect.gen(function* () {
+              const scope = yield* Scope.make();
+              yield* runtime
+                .startOpenCodeServerProcess({
+                  binaryPath,
+                  directory: dir,
+                  environment: { ...process.env, SESSION_TREE_DIR: dir },
+                })
+                .pipe(Scope.provide(scope));
+              return { scope, tree: yield* waitForTree(dir, ALL) };
+            });
+          const first = yield* startSession(makeTreeDir());
+          const second = yield* startSession(makeTreeDir());
+
+          yield* Scope.close(first.scope, Exit.void);
+
+          expect(yield* survivorsOf(first.tree)).toEqual([]);
+          expect(TREE.filter((role) => isRunning(second.tree.get(role)!))).toEqual([...TREE]);
+
+          yield* Scope.close(second.scope, Exit.void);
+
+          expect(yield* survivorsOf(second.tree)).toEqual([]);
+        }).pipe(Effect.provide(OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer)))),
       );
 
       for (const route of ["exits", "crashes"] as const) {

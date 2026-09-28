@@ -89,6 +89,18 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Stop a session only if its adapter reports it idle: no turn running or
+   * starting, no active turn and no live background tasks. The check and the
+   * stop hold the thread's turn-start lock, so no turn can start between them.
+   */
+  readonly stopIdleSession: (
+    input: ProviderStopSessionInput,
+  ) => Effect.Effect<
+    { readonly stopped: true } | { readonly stopped: false; readonly reason: string },
+    ProviderServiceError
+  >;
+
+  /**
    * List active provider sessions.
    *
    * Aggregates runtime session lists from all registered adapters.
@@ -134,6 +146,16 @@ export interface ProviderServiceShape {
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+}
+
+/** Why a live provider session is busy, or undefined when it is idle. */
+export function providerSessionBusyReason(session: ProviderSession): string | undefined {
+  if (session.status === "running" || session.status === "connecting") {
+    return `session ${session.status}`;
+  }
+  if (session.activeTurnId !== undefined) return "active turn";
+  if ((session.backgroundTaskCount ?? 0) > 0) return "live background tasks";
+  return undefined;
 }
 
 /**

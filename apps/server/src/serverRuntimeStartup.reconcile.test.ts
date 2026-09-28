@@ -62,6 +62,7 @@ const makeProviderService = (liveThreadIds: ReadonlyArray<ThreadId> = []) =>
     interruptTurn: () => Effect.die("unused"),
     respondToRequest: () => Effect.die("unused"),
     respondToUserInput: () => Effect.die("unused"),
+    stopIdleSession: () => Effect.die("unused"),
     stopSession: () => Effect.die("unused"),
     listSessions: () => Effect.succeed(liveThreadIds.map((threadId) => ({ threadId }) as never)),
     getCapabilities: () => Effect.die("unused"),
@@ -999,3 +1000,44 @@ it.effect("settles failed opt-in recovery without retrying the provider turn", (
     });
   }),
 );
+
+it.effect("settles a turn that did not survive a restart as an error with its reason", () => {
+  const running = makeThread("thread-lost-in-restart", "running", TurnId.make("turn-lost"));
+  const dispatched: OrchestrationCommand[] = [];
+  return runReconciliation({
+    threads: [running],
+    directory: {
+      getBinding: () => Effect.succeed(Option.none()),
+      upsert: () => Effect.void,
+      recordImportedTranscript: () => Effect.die("unused"),
+      getProvider: () => Effect.die("unused"),
+      listThreadIds: () => Effect.die("unused"),
+      listBindings: () => Effect.succeed([]),
+    },
+    dispatch: (command) =>
+      Effect.sync(() => dispatched.push(command)).pipe(Effect.as({ sequence: dispatched.length })),
+  }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        const [command] = dispatched;
+        assert.equal(dispatched.length, 1);
+        assert.equal(command?.type, "thread.session.set");
+        if (command?.type === "thread.session.set") {
+          assert.deepStrictEqual(
+            {
+              status: command.session.status,
+              activeTurnId: command.session.activeTurnId,
+              lastError: command.session.lastError,
+            },
+            {
+              status: "error",
+              activeTurnId: null,
+              lastError:
+                "Provider session did not survive a server restart. Send a new message to continue.",
+            },
+          );
+        }
+      }),
+    ),
+  );
+});

@@ -96,6 +96,14 @@ export function useProject(ref: ScopedProjectRef | null): EnvironmentProject | n
   return useAtomValue(ref === null ? EMPTY_PROJECT_ATOM : environmentProjects.projectAtom(ref));
 }
 
+/**
+ * When the thread's oldest provider event not yet shown was received, while
+ * the server reports the thread's view behind its agent; null otherwise.
+ */
+export function useThreadIntakeBehindSince(ref: ScopedThreadRef): string | null {
+  return useAtomValue(environmentThreadShells.threadIntakeBehindSinceAtom(ref));
+}
+
 export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadShell | null {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_SHELL_ATOM : environmentThreadShells.threadShellAtom(ref),

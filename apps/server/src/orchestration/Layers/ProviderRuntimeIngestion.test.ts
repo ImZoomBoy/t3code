@@ -58,6 +58,7 @@ import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
+import * as ProviderIntakeLag from "../ProviderIntakeLag.ts";
 import {
   ProviderRuntimeIngestionLive,
   splitBufferedAssistantText,
@@ -129,6 +130,7 @@ function createProviderServiceHarness() {
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
+    stopIdleSession: () => Effect.die("unused"),
     stopSession: () => unsupported(),
     listSessions: () => Effect.succeed([...runtimeSessions]),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
@@ -271,7 +273,10 @@ describe("ProviderRuntimeIngestion", () => {
     threadTitle?: string;
     workspaceSubdirectory?: string;
     isGitRepository?: CheckpointStore.CheckpointStore["Service"]["isGitRepository"];
+    /** Holds the intake worker before it applies each event, until released. */
+    holdIntake?: boolean;
   }) {
+    const intakeGate = options?.holdIntake === true ? Deferred.makeUnsafe<void>() : undefined;
     const repositoryRoot = makeTempDir("t3-provider-project-");
     NodeChildProcess.execFileSync("git", ["init", "--initial-branch=main"], {
       cwd: repositoryRoot,
@@ -297,10 +302,19 @@ describe("ProviderRuntimeIngestion", () => {
       ProjectionSnapshotQuery,
       Effect.gen(function* () {
         const query = yield* ProjectionSnapshotQuery;
+        const gate = intakeGate;
         return ProjectionSnapshotQuery.of({
           ...query,
           getThreadDetailById: () =>
             Effect.die("provider runtime ingestion must not hydrate thread detail"),
+          ...(gate
+            ? {
+                getThreadRuntimeContext: (threadId) =>
+                  Deferred.await(gate).pipe(
+                    Effect.andThen(query.getThreadRuntimeContext(threadId)),
+                  ),
+              }
+            : {}),
         });
       }),
     ).pipe(Layer.provide(projectionSnapshotLayer));
@@ -328,6 +342,7 @@ describe("ProviderRuntimeIngestion", () => {
       // engine, and the snapshot query (reader).
       Layer.provideMerge(ThreadBackgroundLiveness.layer),
       Layer.provideMerge(ThreadPlanProgress.layer),
+      Layer.provideMerge(ProviderIntakeLag.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
@@ -434,6 +449,26 @@ describe("ProviderRuntimeIngestion", () => {
         clockOffsetMs += ms;
       },
       emitAndDrain,
+      emitAndWaitForEnqueue: (events: ReadonlyArray<LegacyProviderRuntimeEvent>) =>
+        testRuntime.runPromise(provider.emitAndWaitForEnqueue(events)),
+      intakeLag: () =>
+        testRuntime.runPromise(Effect.service(ProviderIntakeLag.ProviderIntakeLagService)),
+      releaseIntake: () =>
+        intakeGate === undefined
+          ? Promise.resolve()
+          : testRuntime.runPromise(Deferred.succeed(intakeGate, undefined).pipe(Effect.asVoid)),
+      waitUntil: (predicate: () => boolean) =>
+        testRuntime.runPromise(
+          Effect.gen(function* () {
+            const deadline = (yield* Clock.currentTimeMillis) + 2000;
+            while (!predicate()) {
+              if ((yield* Clock.currentTimeMillis) >= deadline) {
+                return yield* Effect.die(new Error("Timed out waiting for condition"));
+              }
+              yield* Effect.yieldNow;
+            }
+          }),
+        ),
       sqlCount: sqlCounter.count,
       setProviderSession: provider.setSession,
       drain,
@@ -481,6 +516,158 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
   });
+
+  it("reports a thread's queued provider events until they are applied", async () => {
+    const harness = await createHarness({ holdIntake: true });
+    const threadId = asThreadId("thread-1");
+    const base = {
+      provider: ProviderDriverKind.make("claudeAgent"),
+      threadId,
+      turnId: asTurnId("turn-behind"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+    };
+    await harness.emitAndWaitForEnqueue([
+      { ...base, type: "turn.started", eventId: asEventId("behind-started") },
+      {
+        ...base,
+        type: "content.delta",
+        eventId: asEventId("behind-delta"),
+        itemId: asItemId("behind-text"),
+        payload: { streamKind: "assistant_text", delta: "Working." },
+      },
+    ]);
+
+    const lag = await harness.intakeLag();
+    const behind = lag.forThread(threadId);
+    expect(behind.pendingEvents).toBe(2);
+    expect(behind.oldestPendingAtMs).not.toBeNull();
+    expect(lag.snapshot()).toMatchObject({
+      pendingEvents: 2,
+      threads: [{ threadId, pendingEvents: 2 }],
+    });
+    // The projection has not seen the turn yet: the view is behind.
+    expect((await harness.readThreadShell()).session?.activeTurnId).toBeNull();
+
+    await harness.releaseIntake();
+    await harness.drain();
+    expect(lag.forThread(threadId)).toMatchObject({
+      pendingEvents: 0,
+      oldestPendingAtMs: null,
+      lastEventAtMs: behind.lastEventAtMs,
+    });
+    expect(lag.snapshot()).toEqual({ pendingEvents: 0, oldestPendingAt: null, threads: [] });
+    expect((await harness.readThreadShell()).session?.activeTurnId).toBe("turn-behind");
+  });
+
+  it("forgets a thread's last provider event when its session ends or it is deleted", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const base = {
+      provider: ProviderDriverKind.make("claudeAgent"),
+      threadId,
+      createdAt: "2026-01-01T00:00:01.000Z",
+    };
+    const lag = await harness.intakeLag();
+
+    await harness.emitAndDrain([
+      { ...base, type: "turn.started", turnId: "turn-forget", eventId: asEventId("forget-1") },
+    ]);
+    expect(lag.forThread(threadId).lastEventAtMs).not.toBeNull();
+    await harness.emitAndDrain([
+      { ...base, type: "session.exited", eventId: asEventId("forget-exit"), payload: {} },
+    ]);
+    expect(lag.forThread(threadId)).toEqual({
+      pendingEvents: 0,
+      oldestPendingAtMs: null,
+      lastEventAtMs: null,
+    });
+
+    await harness.emitAndDrain([
+      { ...base, type: "turn.started", turnId: "turn-forget-2", eventId: asEventId("forget-2") },
+    ]);
+    expect(lag.forThread(threadId).lastEventAtMs).not.toBeNull();
+    await harness.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("forget-delete"),
+      threadId,
+    });
+    await harness.waitUntil(() => lag.forThread(threadId).lastEventAtMs === null);
+  });
+
+  it("shows a running turn the server lost in a restart as an error with its reason", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-lost-in-restart");
+    await harness.emitAndDrain([
+      {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        threadId,
+        turnId,
+        createdAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        eventId: asEventId("lost-started"),
+      },
+    ]);
+    const lastError =
+      "Provider session did not survive a server restart. Send a new message to continue.";
+    // The session set startup reconciliation dispatches for an orphaned turn.
+    await harness.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("reconcile-lost-turn"),
+      threadId,
+      session: {
+        threadId,
+        status: "error",
+        providerName: "claudeAgent",
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError,
+        updatedAt: "2026-01-01T00:05:00.000Z",
+      },
+      createdAt: "2026-01-01T00:05:00.000Z",
+    });
+
+    const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+    expect(thread?.latestTurn).toMatchObject({ turnId, state: "error" });
+    expect(thread?.session).toMatchObject({ status: "error", lastError });
+  });
+
+  // A turn a provider ends by stopping it, or on a failure, is not a normal
+  // completion. The fleet's reaped workers read as completed turns before.
+  it.each([
+    { state: "interrupted", errorMessage: "Session stopped.", turnState: "interrupted" },
+    { state: "cancelled", errorMessage: "Session stopped.", turnState: "interrupted" },
+    { state: "failed", errorMessage: "Claude runtime stream failed.", turnState: "error" },
+  ] as const)(
+    "records a turn the provider ended as $state as $turnState, not completed",
+    async ({ state, errorMessage, turnState }) => {
+      const harness = await createHarness();
+      const turnId = asTurnId(`turn-ended-${state}`);
+      const base = {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        threadId: asThreadId("thread-1"),
+        turnId,
+        createdAt: "2026-01-01T00:00:01.000Z",
+      };
+      await harness.emitAndDrain([
+        { ...base, type: "turn.started", eventId: asEventId(`started-${state}`) },
+        {
+          ...base,
+          type: "turn.completed",
+          eventId: asEventId(`ended-${state}`),
+          createdAt: "2026-01-01T00:00:02.000Z",
+          payload: { state, errorMessage },
+        },
+      ]);
+
+      const thread = (await harness.readModel()).threads.find(
+        (entry) => entry.id === asThreadId("thread-1"),
+      );
+      expect(thread?.latestTurn).toMatchObject({ turnId, state: turnState });
+      expect(thread?.session?.activeTurnId).toBeNull();
+      if (turnState === "error") expect(thread?.session?.lastError).toBe(errorMessage);
+    },
+  );
 
   it.each([
     { delivery: "buffered", responseStreamingMode: "paragraph" as const },

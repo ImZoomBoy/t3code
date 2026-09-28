@@ -38,9 +38,17 @@ const KeybindingsInvalidEntryIssue = Schema.Struct({
   index: Schema.Number,
 });
 
+// Windows only: the server could not load what ends a session's processes
+// with the session, so they may outlive it.
+const SessionProcessJobsUnavailableIssue = Schema.Struct({
+  kind: Schema.Literal("processes.session-jobs-unavailable"),
+  message: TrimmedNonEmptyString,
+});
+
 export const ServerConfigIssue = Schema.Union([
   KeybindingsMalformedConfigIssue,
   KeybindingsInvalidEntryIssue,
+  SessionProcessJobsUnavailableIssue,
 ]);
 export type ServerConfigIssue = typeof ServerConfigIssue.Type;
 
@@ -610,6 +618,8 @@ export const ServerConfig = Schema.Struct({
   settings: ServerSettings,
   /** Whether shell subscriptions can emit an opt-in catch-up completion marker. */
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /** Whether shell subscriptions can emit provider-intake backlog items. */
+  shellProviderIntake: Schema.optionalKey(Schema.Boolean),
   /** Whether shell.openInEditor honors `LaunchEditorInput.reveal` for the
       file-manager editor. */
   shellRevealInFileManager: Schema.optionalKey(Schema.Boolean),
