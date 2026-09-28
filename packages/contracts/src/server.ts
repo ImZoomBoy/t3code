@@ -38,9 +38,17 @@ const KeybindingsInvalidEntryIssue = Schema.Struct({
   index: Schema.Number,
 });
 
+// Windows only: the server could not load what ends a session's processes
+// with the session, so they may outlive it.
+const SessionProcessJobsUnavailableIssue = Schema.Struct({
+  kind: Schema.Literal("processes.session-jobs-unavailable"),
+  message: TrimmedNonEmptyString,
+});
+
 export const ServerConfigIssue = Schema.Union([
   KeybindingsMalformedConfigIssue,
   KeybindingsInvalidEntryIssue,
+  SessionProcessJobsUnavailableIssue,
 ]);
 export type ServerConfigIssue = typeof ServerConfigIssue.Type;
 

@@ -181,6 +181,7 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import { sessionProcessJobsIssues } from "./process/sessionProcessJob.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -1848,7 +1849,7 @@ const makeWsRpcLayer = (
             cwd: config.cwd,
             keybindingsConfigPath: config.keybindingsConfigPath,
             keybindings: keybindingsConfig.keybindings,
-            issues: keybindingsConfig.issues,
+            issues: [...keybindingsConfig.issues, ...sessionProcessJobsIssues()],
             providers,
             availableEditors,
             // Same discovery-with-timeout treatment as editors: a slow probe
@@ -3672,7 +3673,8 @@ const makeWsRpcLayer = (
                   type: "keybindingsUpdated" as const,
                   payload: {
                     keybindings: event.keybindings,
-                    issues: event.issues,
+                    // Clients replace their issue list with this one.
+                    issues: [...event.issues, ...sessionProcessJobsIssues()],
                   },
                 })),
               );

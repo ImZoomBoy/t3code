@@ -161,6 +161,7 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import { forkParked, ServerActivation } from "./serverActivation.ts";
+import { sessionProcessJobsUnavailable } from "./process/sessionProcessJob.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
 // 100-character default for one path segment.
@@ -673,6 +674,19 @@ const makeServerLayer = Layer.unwrap(
           ),
       ),
     );
+    // The hook is installed before any runtime exists, so its load failure is
+    // logged here, where the server log sees it.
+    const sessionProcessJobsReportLayer = Layer.effectDiscard(
+      Effect.suspend(() => {
+        const reason = sessionProcessJobsUnavailable();
+        return reason === undefined
+          ? Effect.void
+          : Effect.logError(
+              "Session process jobs are unavailable: processes a provider session starts may outlive the session",
+              { reason },
+            );
+      }),
+    );
     const tailscaleServeLayer = config.tailscaleServeEnabled
       ? Layer.effectDiscard(
           Effect.acquireRelease(
@@ -817,6 +831,7 @@ const makeServerLayer = Layer.unwrap(
       runtimeStateLayer.pipe(Layer.provide(launcherLayer)),
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
+      sessionProcessJobsReportLayer,
     );
 
     return serverApplicationLayer.pipe(
