@@ -10,6 +10,7 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderIntakeLag from "../../../orchestration/ProviderIntakeLag.ts";
 
 /**
  * Who the calling thread is. Every field is copied from the server's own
@@ -31,6 +32,15 @@ export const FleetThreadSummary = Schema.Struct({
     description: "True when the thread is archived, false when it is live.",
   }),
   updatedAt: IsoDateTime.annotate({ description: "When the thread last changed." }),
+  providerIntake: Schema.optional(
+    Schema.Struct({
+      pendingEvents: Schema.Number,
+      oldestPendingAt: IsoDateTime,
+    }).annotate({
+      description:
+        "Present when provider events for this thread are received but not yet applied. The rest of this entry is older than the provider by at least that long.",
+    }),
+  ),
 });
 export type FleetThreadSummary = typeof FleetThreadSummary.Type;
 
@@ -68,6 +78,7 @@ const FleetListThreadsTool = Tool.make("fleet_list_threads", {
   dependencies: [
     McpInvocationContext.McpInvocationContext,
     ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+    ProviderIntakeLag.ProviderIntakeLagService,
   ],
 })
   .annotate(Tool.Title, "List threads")

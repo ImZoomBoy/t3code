@@ -5,6 +5,7 @@ import {
   TurnId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderSession,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
@@ -18,11 +19,16 @@ import * as Stream from "effect/Stream";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderIntakeLag from "../../orchestration/ProviderIntakeLag.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderSessionReaper } from "../Services/ProviderSessionReaper.ts";
-import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import {
+  ProviderService,
+  providerSessionBusyReason,
+  type ProviderServiceShape,
+} from "../Services/ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import { makeProviderSessionReaperLive } from "./ProviderSessionReaper.ts";
 
@@ -122,7 +128,9 @@ function makeReadModel(
 
 describe("ProviderSessionReaper", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    ProviderSessionReaper | ProviderSessionRuntime.ProviderSessionRuntimeRepository,
+    | ProviderSessionReaper
+    | ProviderSessionRuntime.ProviderSessionRuntimeRepository
+    | ProviderIntakeLag.ProviderIntakeLagService,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -178,6 +186,7 @@ describe("ProviderSessionReaper", () => {
     readonly stopSessionImplementation?: (input: {
       readonly threadId: ThreadId;
     }) => ReturnType<ProviderServiceShape["stopSession"]>;
+    readonly liveSessions?: ReadonlyArray<ProviderSession>;
   }) {
     const stoppedThreadIds = new Set<ThreadId>();
     const stopSession = vi.fn<ProviderServiceShape["stopSession"]>(
@@ -197,7 +206,15 @@ describe("ProviderSessionReaper", () => {
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession,
-      listSessions: () => Effect.succeed([]),
+      // Mirrors the real check: refuse when the adapter's live session is busy.
+      stopIdleSession: (request) => {
+        const live = input.liveSessions?.find((session) => session.threadId === request.threadId);
+        const reason = live === undefined ? undefined : providerSessionBusyReason(live);
+        return reason === undefined
+          ? stopSession(request).pipe(Effect.as({ stopped: true } as const))
+          : Effect.succeed({ stopped: false, reason } as const);
+      },
+      listSessions: () => Effect.succeed([...(input.liveSessions ?? [])]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       assertConversationRollbackSupported: () => unsupported(),
       getInstanceInfo: (instanceId) => {
@@ -231,6 +248,7 @@ describe("ProviderSessionReaper", () => {
       Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(runtimeRepositoryLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
+      Layer.provideMerge(ProviderIntakeLag.layer),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getUserInputActivity: () => Effect.die("unused"),
@@ -414,6 +432,114 @@ describe("ProviderSessionReaper", () => {
     expect(harness.stopSession).not.toHaveBeenCalled();
     const remaining = await runtime!.runPromise(repository.getByThreadId({ threadId }));
     expect(Option.isSome(remaining)).toBe(true);
+  });
+
+  // The fleet incident: intake ran 31 minutes behind, so the projection still
+  // showed each worker's session starting with no active turn while its
+  // provider was mid-turn, and the reaper stopped five busy sessions.
+  describe("never stops a session whose view is behind its provider", () => {
+    const threadId = ThreadId.make("thread-reaper-behind");
+    const sentAt = "2026-04-14T00:00:00.000Z";
+    const sweepMs = Date.parse("2026-04-14T00:31:30.000Z");
+    const liveTurn: ProviderSession = {
+      provider: ProviderDriverKind.make("claudeAgent"),
+      status: "running",
+      runtimeMode: "full-access",
+      threadId,
+      activeTurnId: TurnId.make("turn-live"),
+      createdAt: sentAt,
+      updatedAt: sentAt,
+    };
+
+    async function sweepStale(options: {
+      readonly projectedStatus: "starting" | "ready";
+      readonly liveSessions?: ReadonlyArray<ProviderSession>;
+      readonly intake?: (lag: ProviderIntakeLag.ProviderIntakeLagService["Service"]) => void;
+    }) {
+      const harness = await createHarness({
+        readModel: makeReadModel([
+          {
+            id: threadId,
+            session: {
+              threadId,
+              status: options.projectedStatus,
+              providerName: "claudeAgent",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: sentAt,
+            },
+          },
+        ]),
+        ...(options.liveSessions ? { liveSessions: options.liveSessions } : {}),
+      });
+      const repository = await runtime!.runPromise(
+        Effect.service(ProviderSessionRuntime.ProviderSessionRuntimeRepository),
+      );
+      await runtime!.runPromise(
+        repository.upsert({
+          threadId,
+          providerName: "claudeAgent",
+          providerInstanceId: null,
+          adapterKey: "claudeAgent",
+          runtimeMode: "full-access",
+          status: "running",
+          lastSeenAt: sentAt,
+          resumeCursor: { opaque: "resume-behind" },
+          runtimePayload: null,
+        }),
+      );
+      const lag = await runtime!.runPromise(
+        Effect.service(ProviderIntakeLag.ProviderIntakeLagService),
+      );
+      options.intake?.(lag);
+      await sweepAt(sweepMs);
+      return harness;
+    }
+
+    it("reaps the same quiet session when nothing says it is busy", async () => {
+      const harness = await sweepStale({ projectedStatus: "ready" });
+      expect(harness.stopSession).toHaveBeenCalledExactlyOnceWith({ threadId });
+    });
+
+    it("skips a session the projection still shows starting", async () => {
+      const harness = await sweepStale({ projectedStatus: "starting" });
+      expect(harness.stopSession).not.toHaveBeenCalled();
+    });
+
+    it("skips a session its adapter reports mid-turn", async () => {
+      const harness = await sweepStale({ projectedStatus: "ready", liveSessions: [liveTurn] });
+      expect(harness.stopSession).not.toHaveBeenCalled();
+    });
+
+    it("skips a session whose adapter still runs background tasks with no turn", async () => {
+      const harness = await sweepStale({
+        projectedStatus: "ready",
+        liveSessions: [
+          { ...liveTurn, status: "ready", activeTurnId: undefined, backgroundTaskCount: 1 },
+        ],
+      });
+      expect(harness.stopSession).not.toHaveBeenCalled();
+    });
+
+    it("skips a session whose provider events are still queued", async () => {
+      const harness = await sweepStale({
+        projectedStatus: "ready",
+        intake: (lag) => lag.recordQueued(threadId, Date.parse(sentAt) + 5_000),
+      });
+      expect(harness.stopSession).not.toHaveBeenCalled();
+    });
+
+    it("counts a recent provider event as activity", async () => {
+      const harness = await sweepStale({
+        projectedStatus: "ready",
+        intake: (lag) => {
+          lag.recordQueued(threadId, sweepMs - 500);
+          lag.recordApplied(threadId);
+        },
+      });
+      expect(harness.stopSession).not.toHaveBeenCalled();
+    });
   });
 
   it.each(["ready", "interrupted", "error"] as const)(

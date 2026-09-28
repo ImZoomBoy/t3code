@@ -274,6 +274,11 @@ interface ClaudeTurnState {
    * steered instead (the queued message continues the same turn).
    */
   readonly synthetic?: boolean;
+  /**
+   * Uuids of every message sent into a requested turn: its prompt (sent with
+   * the turn id) and each steer. A result that echoes any of them ends it.
+   */
+  readonly sentMessageUuids?: Set<string>;
   readonly items: Array<unknown>;
   readonly assistantTextBlocks: Map<number, AssistantTextBlockState>;
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
@@ -1744,6 +1749,21 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
  */
 function isOverloadedResult(result: SDKResultMessage): boolean {
   return result.subtype === "success" && result.api_error_status === 529;
+}
+
+/**
+ * Whether a result ends a turn whose messages were sent with `sentUuids`. A
+ * result that echoes the messages it consumed answers the turn only if that
+ * list holds one of them. A queued task notice's result echoes none and says
+ * so in its origin. Results with neither (older CLIs, zeroed failure results)
+ * still end the turn.
+ */
+function resultAnswersTurn(result: SDKResultMessage, sentUuids: ReadonlySet<string>): boolean {
+  const echoed =
+    result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : []);
+  if (echoed.some((uuid) => sentUuids.has(uuid))) return true;
+  if (result.origin?.kind === "task-notification") return false;
+  return echoed.length === 0;
 }
 
 /** Derives turn status and its error from the same provider result. */
@@ -3552,6 +3572,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const turn = context.turnState;
+    // On resume after a process died with background tasks running, Claude
+    // Code runs a queued orphaned-task notice as its own turn before the
+    // prompt. That result is not the requested turn's end: the requested turn
+    // ends on the result that echoes the uuid its prompt was sent with.
+    if (
+      turn &&
+      turn.synthetic !== true &&
+      !resultAnswersTurn(message, turn.sentMessageUuids ?? new Set([turn.turnId]))
+    ) {
+      yield* Effect.logInfo("claude.turn.result-for-other-prompt", {
+        threadId: context.session.threadId,
+        turnId: turn.turnId,
+        origin: message.origin?.kind,
+        userMessageUuid: message.user_message_uuid,
+        numTurns: message.num_turns,
+      });
+      return;
+    }
     const failureHint =
       turn?.authenticationFailureMessage ??
       (turn && (turn.rejectedRateLimitTypes.size > 0 || turn.latestAssistantRateLimited)
@@ -5299,6 +5337,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const turnState: ClaudeTurnState = {
         turnId,
         startedAt: yield* nowIso,
+        sentMessageUuids: new Set([turnId]),
         items: [],
         assistantTextBlocks: new Map(),
         assistantTextBlockOrder: [],
@@ -5363,12 +5402,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     if (steeringTurnState === null) context.turnStartMessageIds.push(turnId);
     yield* updateResumeCursor(context);
+    // A steer carries its own uuid, so the result that answers it can be
+    // matched to this turn.
+    const messageUuid = steeringTurnState === null ? turnId : yield* randomUUIDv4;
+    steeringTurnState?.sentMessageUuids?.add(messageUuid);
     yield* Queue.offer(context.promptQueue, {
       type: "message",
-      message:
-        steeringTurnState === null
-          ? { ...message, uuid: turnId as NonNullable<SDKUserMessage["uuid"]> }
-          : message,
+      message: { ...message, uuid: messageUuid as NonNullable<SDKUserMessage["uuid"]> },
     }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
 
     return {
@@ -5623,7 +5663,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   );
 
   const listSessions: ClaudeAdapterShape["listSessions"] = () =>
-    Effect.sync(() => Array.from(sessions.values(), ({ session }) => ({ ...session })));
+    Effect.sync(() =>
+      Array.from(sessions.values(), ({ session, liveTaskIds }) => ({
+        ...session,
+        // Background tasks outlive the turn that started them; a session
+        // running them is not idle.
+        ...(liveTaskIds.size > 0 ? { backgroundTaskCount: liveTaskIds.size } : {}),
+      })),
+    );
 
   const hasSession: ClaudeAdapterShape["hasSession"] = (threadId) =>
     Effect.sync(() => {

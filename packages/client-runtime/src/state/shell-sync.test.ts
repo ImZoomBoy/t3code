@@ -5,6 +5,7 @@ import {
   type OrchestrationShellStreamItem,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -150,6 +151,119 @@ describe("environment shell synchronization", () => {
       expect(state.status).toBe("live");
       expect(Option.getOrThrow(state.snapshot)).toEqual(LIVE_SHELL_SNAPSHOT);
     }),
+  );
+
+  it.live("keeps the server's behind-thread backlog on the snapshot but out of the cache", () =>
+    Effect.gen(function* () {
+      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+      const subscribeInputs: Array<{ readonly requestProviderIntake?: boolean }> = [];
+      const client = {
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: (input: {
+          readonly requestProviderIntake?: boolean;
+        }) => {
+          subscribeInputs.push(input);
+          return Stream.fromQueue(events);
+        },
+      } as unknown as WsRpcProtocolClient;
+      const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+      const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
+        Option.some({
+          ...session(client),
+          initialConfig: Effect.succeed({
+            shellResumeCompletionMarker: true,
+            shellProviderIntake: true,
+          } as never),
+        }),
+      );
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: supervisorState,
+        session: activeSession,
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const saved = yield* Deferred.make<OrchestrationShellSnapshot>();
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.none()),
+        saveShell: (_environmentId, snapshot) =>
+          Deferred.succeed(saved, snapshot).pipe(Effect.asVoid),
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeed(Option.none()),
+        saveServerConfig: () => Effect.void,
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      });
+      const shellState = yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(
+          ShellSnapshotLoader,
+          ShellSnapshotLoader.of({ load: () => Effect.succeed(Option.none()) }),
+        ),
+      );
+      yield* SubscriptionRef.set(supervisorState, {
+        desired: true,
+        network: "online",
+        phase: "connected",
+        stage: null,
+        attempt: 1,
+        generation: 1,
+        lastFailure: null,
+        retryAt: null,
+      });
+      const backlog = {
+        pendingEvents: 3,
+        oldestPendingAt: "2026-06-06T00:00:01.000Z",
+        threads: [
+          {
+            threadId: "thread-behind" as never,
+            pendingEvents: 3,
+            oldestPendingAt: "2026-06-06T00:00:01.000Z",
+          },
+        ],
+      };
+      // The backlog can arrive before the snapshot it describes.
+      yield* Queue.offerAll(events, [
+        { kind: "provider-intake", backlog },
+        { kind: "snapshot", snapshot: LIVE_SHELL_SNAPSHOT },
+        { kind: "synchronized" },
+        { kind: "thread-upserted", sequence: 2, thread: { id: "thread-behind" } as never },
+      ]);
+      const live = yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter(
+          (state) =>
+            state.status === "live" &&
+            Option.isSome(state.snapshot) &&
+            state.snapshot.value.snapshotSequence === 2,
+        ),
+        Stream.runHead,
+        Effect.map(Option.getOrThrow),
+      );
+      expect(subscribeInputs[0]?.requestProviderIntake).toBe(true);
+      expect(Option.getOrThrow(live.snapshot).providerIntake).toEqual(backlog);
+      expect(yield* Deferred.await(saved)).not.toHaveProperty("providerIntake");
+
+      yield* Queue.offer(events, {
+        kind: "provider-intake",
+        backlog: { pendingEvents: 0, oldestPendingAt: null, threads: [] },
+      });
+      const caughtUp = yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter(
+          (state) =>
+            Option.isSome(state.snapshot) &&
+            state.snapshot.value.providerIntake?.threads.length === 0,
+        ),
+        Stream.runHead,
+      );
+      expect(Option.isSome(caughtUp)).toBe(true);
+    }).pipe(Effect.scoped),
   );
 
   it.live.each([

@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as ProviderIntakeLag from "../../../orchestration/ProviderIntakeLag.ts";
 import { listThreads, whoami } from "./handlers.ts";
 
 const makeScope = (
@@ -132,9 +133,12 @@ it.effect("lists archived threads alongside live ones and says which is which", 
     const result = yield* listThreads().pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
       Effect.provide(
-        makeProjectionLayer(
-          [makeThreadShell("thread-live", null)],
-          [makeThreadShell("thread-archived", "2026-01-03T00:00:00.000Z")],
+        Layer.mergeAll(
+          makeProjectionLayer(
+            [makeThreadShell("thread-live", null)],
+            [makeThreadShell("thread-archived", "2026-01-03T00:00:00.000Z")],
+          ),
+          ProviderIntakeLag.layer,
         ),
       ),
     );
@@ -157,12 +161,37 @@ it.effect("lists archived threads alongside live ones and says which is which", 
   });
 });
 
+it.effect("says which threads have provider events not yet applied", () => {
+  const scope = makeScope(["fleet"]);
+  return Effect.gen(function* () {
+    const lag = yield* ProviderIntakeLag.ProviderIntakeLagService;
+    lag.recordQueued("thread-busy", Date.parse("2026-01-02T00:30:00.000Z"));
+    lag.recordQueued("thread-busy", Date.parse("2026-01-02T00:31:00.000Z"));
+    const result = yield* listThreads();
+    expect(result.threads.map((thread) => [thread.threadId, thread.providerIntake])).toEqual([
+      ["thread-busy", { pendingEvents: 2, oldestPendingAt: "2026-01-02T00:30:00.000Z" }],
+      ["thread-quiet", undefined],
+    ]);
+  }).pipe(
+    Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+    Effect.provide(
+      Layer.mergeAll(
+        makeProjectionLayer(
+          [makeThreadShell("thread-busy", null), makeThreadShell("thread-quiet", null)],
+          [],
+        ),
+        ProviderIntakeLag.layer,
+      ),
+    ),
+  );
+});
+
 it.effect("refuses listing with the existing capability error", () => {
   const scope = makeScope(["preview"]);
   return Effect.gen(function* () {
     const error = yield* listThreads().pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
-      Effect.provide(makeProjectionLayer([], [])),
+      Effect.provide(Layer.mergeAll(makeProjectionLayer([], []), ProviderIntakeLag.layer)),
       Effect.flip,
     );
     expect(error).toBeInstanceOf(McpCapabilityUnavailableError);

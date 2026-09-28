@@ -138,6 +138,19 @@ export function createEnvironmentThreadShellAtoms(input: {
     }).pipe(Atom.withLabel(`environment-thread-shell:${key}`));
   });
 
+  // When the thread's oldest unapplied provider event was queued, while the
+  // server reports the thread's view behind its provider; null otherwise. A
+  // string, so a row re-renders only when its own value changes.
+  const threadIntakeBehindSinceAtomFamily = Atom.family((key: string) => {
+    const ref = parseThreadKey(key);
+    return Atom.make(
+      (get): string | null =>
+        get(input.snapshotAtom(ref.environmentId))?.providerIntake?.threads.find(
+          (thread) => thread.threadId === ref.threadId,
+        )?.oldestPendingAt ?? null,
+    ).pipe(Atom.withLabel(`environment-thread-intake-behind:${key}`));
+  });
+
   const threadShellsForProjectRefsAtomFamily = Atom.family((key: string) => {
     const projectRefs = parseProjectRefCollectionKey(key);
     let previous: ReadonlyArray<EnvironmentThreadShell> = [];
@@ -209,5 +222,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),
+    threadIntakeBehindSinceAtom: (ref: ScopedThreadRef) =>
+      threadIntakeBehindSinceAtomFamily(threadKey(ref)),
   };
 }

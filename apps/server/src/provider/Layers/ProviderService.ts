@@ -49,6 +49,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
@@ -1566,6 +1567,39 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  // Per-thread lock between turn starts and idle stops. Each sendTurn holds
+  // one permit while it hands a turn to the adapter, so concurrent sends (a
+  // steer) do not wait on each other. stopIdleSession takes every permit, so
+  // no turn can start between its idle check and the stop. Entries go when
+  // the last holder leaves.
+  const THREAD_LOCK_PERMITS = 1024;
+  const threadLocks = new Map<
+    ThreadId,
+    { readonly semaphore: Semaphore.Semaphore; holders: number }
+  >();
+  const withThreadLock =
+    (threadId: ThreadId, mode: "turn-start" | "stop") =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+      Effect.suspend(() => {
+        let entry = threadLocks.get(threadId);
+        if (entry === undefined) {
+          entry = { semaphore: Semaphore.makeUnsafe(THREAD_LOCK_PERMITS), holders: 0 };
+          threadLocks.set(threadId, entry);
+        }
+        const held = entry;
+        held.holders += 1;
+        return held.semaphore
+          .withPermits(mode === "stop" ? THREAD_LOCK_PERMITS : 1)(effect)
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                held.holders -= 1;
+                if (held.holders === 0) threadLocks.delete(threadId);
+              }),
+            ),
+          );
+      });
+
   const sendTurn: ProviderServiceMethod<"sendTurn"> = Effect.fn("sendTurn")(function* (rawInput) {
     const parsed = yield* decodeInputOrValidationError({
       operation: "ProviderService.sendTurn",
@@ -1777,6 +1811,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       return turn;
     }).pipe(
+      withThreadLock(input.threadId, "turn-start"),
       withMetrics({
         counter: providerTurnsTotal,
         timer: providerTurnDuration,
@@ -2028,6 +2063,28 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }),
     );
   });
+
+  const stopIdleSession: ProviderServiceMethod<"stopIdleSession"> = Effect.fn("stopIdleSession")(
+    function* (input) {
+      return yield* Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: "ProviderService.stopIdleSession",
+          allowRecovery: false,
+        });
+        if (routed.isActive) {
+          const live = (yield* routed.adapter.listSessions()).find(
+            (session) => session.threadId === routed.threadId,
+          );
+          const busy =
+            live === undefined ? undefined : ProviderService.providerSessionBusyReason(live);
+          if (busy !== undefined) return { stopped: false, reason: busy } as const;
+        }
+        yield* stopSession(input);
+        return { stopped: true } as const;
+      }).pipe(withThreadLock(input.threadId, "stop"));
+    },
+  );
 
   const stopSession: ProviderServiceMethod<"stopSession"> = Effect.fn("stopSession")(
     function* (rawInput) {
@@ -2406,6 +2463,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopIdleSession,
     listSessions,
     getCapabilities,
     getInstanceInfo,
