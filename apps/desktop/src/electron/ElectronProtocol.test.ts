@@ -28,6 +28,16 @@ describe("ElectronProtocol", () => {
     unhandleMock.mockReset();
   });
 
+  it("serves the renderer from upstream's origin and keeps the fork's link scheme", () => {
+    // T3's Clerk instance accepts t3code://app, not t3code-fork://app, so T3 Connect
+    // sign-in only loads from upstream's origin.
+    assert.equal(ElectronProtocol.getDesktopUrl(false), "t3code://app/");
+    assert.equal(ElectronProtocol.getDesktopScheme(true), "t3code-dev");
+    // The OS link handler stays the fork's, so an official install keeps t3code://.
+    assert.equal(ElectronProtocol.getDesktopLinkScheme(false), "t3code-fork");
+    assert.equal(ElectronProtocol.getDesktopLinkScheme(true), "t3code-fork-dev");
+  });
+
   it.effect("serves the bundled client from disk without a backend", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

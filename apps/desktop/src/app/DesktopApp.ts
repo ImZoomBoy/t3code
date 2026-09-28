@@ -15,6 +15,7 @@ import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
+import * as ForkRendererStorageMigration from "./ForkRendererStorageMigration.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
@@ -167,6 +168,23 @@ const bootstrap = Effect.gen(function* () {
   yield* logBootstrapInfo("bootstrap start");
 
   const settings = yield* desktopSettings.get;
+  // Fork: before the renderer scheme gets its real handler, carry browser storage
+  // over from the fork's old renderer origin. A failure only costs that storage.
+  const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
+  yield* appIdentity.resolveUserDataPath.pipe(
+    Effect.flatMap((userDataPath) =>
+      ForkRendererStorageMigration.migrateLegacyRendererStorage({
+        legacyScheme: ElectronProtocol.getDesktopLinkScheme(environment.isDevelopment),
+        currentScheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
+        host: ElectronProtocol.DESKTOP_HOST,
+        userDataPath,
+      }),
+    ),
+    Effect.tap((result) => logBootstrapInfo("fork renderer storage migration", { result })),
+    Effect.catch((error) =>
+      logBootstrapWarning("fork renderer storage migration failed", { error }),
+    ),
+  );
   // The renderer is served from the bundled client (or Vite in development)
   // rather than through the local backend, so the window can open without one.
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
