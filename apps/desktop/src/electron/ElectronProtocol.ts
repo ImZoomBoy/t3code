@@ -13,15 +13,26 @@ import * as Scope from "effect/Scope";
 import * as Electron from "electron";
 
 export const DESKTOP_HOST = "app";
-// Distinct from upstream's "t3code": this is registered as the OS-level default
-// protocol handler (app.setAsDefaultProtocolClient), so sharing the scheme with an
-// official T3 Code install would let whichever app registered most recently steal
-// the other's t3code:// links.
-const DESKTOP_PRODUCTION_SCHEME = "t3code-fork";
-export const DESKTOP_DEVELOPMENT_SCHEME = "t3code-fork-dev";
+// The renderer is served from upstream's origin. T3's production Clerk instance
+// only accepts requests from t3code://app, so T3 Connect sign-in needs it.
+const DESKTOP_PRODUCTION_SCHEME = "t3code";
+export const DESKTOP_DEVELOPMENT_SCHEME = "t3code-dev";
+// Fork-only: the scheme registered as the OS-level link handler
+// (app.setAsDefaultProtocolClient, the installer's protocol list, the Linux
+// desktop entry). Distinct from upstream's so an official T3 Code install keeps
+// its t3code:// links. The fork once served the renderer from it too, so its
+// origin still holds older browser storage (see ForkRendererStorageMigration).
+const DESKTOP_PRODUCTION_LINK_SCHEME = "t3code-fork";
+const DESKTOP_DEVELOPMENT_LINK_SCHEME = "t3code-fork-dev";
 
+/** The scheme the renderer is served from. It decides the window's origin. */
 export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
+}
+
+/** The scheme the OS routes to this app. Never upstream's, see above. */
+export function getDesktopLinkScheme(isDevelopment: boolean): string {
+  return isDevelopment ? DESKTOP_DEVELOPMENT_LINK_SCHEME : DESKTOP_PRODUCTION_LINK_SCHEME;
 }
 
 function getDesktopOrigin(isDevelopment: boolean): string {
@@ -120,9 +131,17 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
  * Must run synchronously during process bootstrap, before Electron emits `ready`.
  */
 function registerDesktopSchemePrivilegesSync(): void {
-  Electron.protocol.registerSchemesAsPrivileged([
-    {
-      scheme: DESKTOP_PRODUCTION_SCHEME,
+  // Fork: the link schemes are listed too. The storage migration loads a page from
+  // the old t3code-fork://app origin, and web storage only exists on a standard
+  // scheme. Electron allows this call once, so every scheme belongs in this list.
+  Electron.protocol.registerSchemesAsPrivileged(
+    [
+      DESKTOP_PRODUCTION_SCHEME,
+      DESKTOP_DEVELOPMENT_SCHEME,
+      DESKTOP_PRODUCTION_LINK_SCHEME,
+      DESKTOP_DEVELOPMENT_LINK_SCHEME,
+    ].map((scheme) => ({
+      scheme,
       privileges: {
         standard: true,
         secure: true,
@@ -130,18 +149,8 @@ function registerDesktopSchemePrivilegesSync(): void {
         corsEnabled: true,
         stream: true,
       },
-    },
-    {
-      scheme: DESKTOP_DEVELOPMENT_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-        stream: true,
-      },
-    },
-  ]);
+    })),
+  );
 }
 
 const registerDesktopSchemePrivileges = Effect.sync(registerDesktopSchemePrivilegesSync).pipe(

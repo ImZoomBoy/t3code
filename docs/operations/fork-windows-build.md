@@ -51,10 +51,18 @@ so a later upstream change to `.env.example` reaches this machine only once you 
 hand-written `.env` or `.env.local` is yours in full: when it is missing one of the four values, T3
 Connect stays off, because nothing fills a single missing key from `.env.example`.
 
-Known risk: the fork's OAuth callback scheme is `t3code-fork://` and the official Clerk instance
-allowlists `t3code://app/` and `t3code-dev://app/` only, so a Google or GitHub sign-in may open the
-browser and never come back, while email code sign-in stays in the window
-([#137](https://github.com/autoprintworks/t3code/issues/137)).
+The build values are not enough on their own. T3's production Clerk instance only accepts requests
+from `t3code://app`, and answers any other origin with `origin_invalid`, so T3 Connect sits at
+"Loading sign-in..." forever. The fork therefore serves its window from upstream's `t3code://app` and
+keeps `t3code-fork://` only as the link scheme the OS routes to it (see
+[`ElectronProtocol.ts`](../../apps/desktop/src/electron/ElectronProtocol.ts)). The first launch after
+that change copies browser storage (drafts, prompt stash, themes, sidebar folds) from the old
+`t3code-fork://app` origin, in
+[`ForkRendererStorageMigration.ts`](../../apps/desktop/src/app/ForkRendererStorageMigration.ts).
+
+Known limit: Clerk sends an OAuth sign-in back to `t3code://app/`, which belongs to the official
+install, so a Google or GitHub sign-in does not come back to the fork. Sign in with email and password,
+which stays in the window.
 
 ## The collision decision — read before running the installer
 
@@ -71,10 +79,11 @@ convenience of a shared thread list on day one. So the fork now gets its own ide
   `%LOCALAPPDATA%\Programs\t3code`, where an official release lives. Installing this build cannot
   replace or corrupt an official install's files.
 - **Different app identity.** Product name (`T3 Code Fork`), Windows AppUserModelID
-  (`com.autoprintworks.t3code`), and the custom URL scheme used for OAuth callbacks
+  (`com.autoprintworks.t3code`), and the link scheme the OS routes to the app
   (`t3code-fork://` / `t3code-fork-dev://`, see `apps/desktop/src/electron/ElectronProtocol.ts`) are all
   distinct from the official build's. Two different OS-level protocol handlers can't fight over the same
-  scheme.
+  scheme. The window's own origin is upstream's `t3code://app`, because T3 Connect needs it; that
+  origin never touches the OS, and each install keeps its own browser storage in its own data folder.
 - **Visibly different once open.** The app icon is an orange T3 tile with an "SI" corner badge, the same
   icon the sidebar header shows, the window title reads `T3 Code Fork (Alpha)`, and the sidebar wordmark carries a small `FORK`
   tag, so the taskbar, Alt-Tab and the open window all say which build you are in

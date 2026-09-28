@@ -76,8 +76,12 @@ function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
     storage: storage({ path: stateDir }),
     passkeys: true,
+    // Fork: the bridge registers this scheme as the OS link handler and uses it for
+    // the OAuth return link, so it gets the fork's link scheme, not the renderer's
+    // t3code. The official install keeps t3code://, and an OAuth sign-in that Clerk
+    // returns to t3code://app/ does not reach the fork. Email sign-in needs no link.
     renderer: {
-      scheme: ElectronProtocol.getDesktopScheme(isDevelopment),
+      scheme: ElectronProtocol.getDesktopLinkScheme(isDevelopment),
       host: ElectronProtocol.DESKTOP_HOST,
     },
   });

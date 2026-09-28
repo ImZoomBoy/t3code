@@ -3,8 +3,8 @@
   "features": [
     {
       "name": "fork-app-identity",
-      "description": "The fork installs and runs beside official T3 Code: its own app id, product name, state directory (~/.t3-fork) and t3code-fork:// URL scheme. Issues #34 and #59.",
-      "keep": "Our app id, product name, window title, ~/.t3-fork state directory, t3code-fork:// URL scheme and Linux desktop entry name and WM class replace upstream's wherever these files set them; take upstream for the rest of these files, then re-apply those settings on top.",
+      "description": "The fork installs and runs beside official T3 Code: its own app id, product name, state directory (~/.t3-fork) and t3code-fork:// link scheme, the one the OS routes to the app. The renderer itself is served from upstream's t3code://app, see fork-connect-renderer-origin. Issues #34 and #59.",
+      "keep": "Our app id, product name, window title, ~/.t3-fork state directory, t3code-fork:// link scheme and Linux desktop entry name and WM class replace upstream's wherever these files set them; the renderer scheme stays upstream's t3code; take upstream for the rest of these files, then re-apply those settings on top.",
       "files": [
         "apps/desktop/src/app/DesktopEnvironment.ts",
         "apps/desktop/src/app/DesktopEarlyElectronStartup.ts",
@@ -129,6 +129,25 @@
         "docs/operations/fork-windows-build.md"
       ],
       "test": "scripts/lib/fork-public-env.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fork-connect-renderer-origin",
+      "description": "T3 Connect sign-in works in the fork. T3's production Clerk instance accepts t3code://app and rejects t3code-fork://app with origin_invalid, so the renderer is served from upstream's t3code scheme while the Clerk bridge, the installer and the Linux desktop entry keep the fork's t3code-fork link scheme. On first launch ForkRendererStorageMigration.ts copies localStorage (drafts, prompt stash, themes, sidebar and second mate folds) from the old t3code-fork://app origin to t3code://app. ForkRendererStorageMigration.ts is the fork's own module and upstream has no file at that path, so its test cannot pass on plain upstream.",
+      "keep": "ForkRendererStorageMigration.ts is ours whole. getDesktopLinkScheme, the link schemes in the privileged scheme list and the comments on them survive in ElectronProtocol.ts; DesktopClerk.ts, DesktopLinuxUrlHandler.ts and DesktopPreReadyPlatform.ts pass getDesktopLinkScheme where upstream passes getDesktopScheme; the migration call before registerDesktopProtocol survives in DesktopApp.ts; the Google and GitHub sign-in note survives in the doc; everything else in those files takes upstream.",
+      "files": [
+        "apps/desktop/src/app/ForkRendererStorageMigration.ts",
+        "apps/desktop/src/electron/ElectronProtocol.ts",
+        "apps/desktop/src/app/DesktopClerk.ts",
+        "apps/desktop/src/app/DesktopLinuxUrlHandler.ts",
+        "apps/desktop/src/app/DesktopPreReadyPlatform.ts",
+        "apps/desktop/src/app/DesktopApp.ts",
+        "docs/operations/fork-windows-build.md"
+      ],
+      "test": [
+        "apps/desktop/src/app/ForkRendererStorageMigration.test.ts",
+        "apps/desktop/src/electron/ElectronProtocol.test.ts"
+      ],
       "patchesUpstream": true
     },
     {
