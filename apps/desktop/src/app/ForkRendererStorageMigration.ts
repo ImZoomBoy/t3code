@@ -17,10 +17,15 @@ import * as Electron from "electron";
 
 export type StorageEntries = ReadonlyArray<readonly [string, string]>;
 
-/** Written to the userData directory once the copy has run. */
+/**
+ * Written to the userData directory after each run: "copied" once the copy is
+ * done, or "failed <n>" after n failed launches. Startup stops trying after
+ * MAX_MIGRATION_ATTEMPTS failures, so a lasting fault cannot delay every launch.
+ */
 export const MIGRATION_MARKER_FILE = "fork-renderer-storage-migrated";
+export const MAX_MIGRATION_ATTEMPTS = 3;
 
-const MIGRATION_TIMEOUT = Duration.seconds(20);
+const MIGRATION_TIMEOUT = Duration.seconds(10);
 const BLANK_PAGE = "<!doctype html><title></title>";
 const READ_LOCAL_STORAGE = "Object.entries(window.localStorage)";
 
@@ -41,17 +46,23 @@ export class ForkRendererStorageMigrationError extends Schema.TaggedError<ForkRe
 }
 
 /** The legacy entries to write: every key the current origin does not hold yet. */
-export function planLegacyStorageCopy(
-  legacy: StorageEntries,
-  current: StorageEntries,
-): Array<readonly [string, string]> {
+export function planLegacyStorageCopy(legacy: StorageEntries, current: StorageEntries) {
   const present = new Set(current.map(([key]) => key));
   return legacy.filter(([key]) => !present.has(key));
 }
 
 export type ForkRendererStorageMigrationResult =
   | { readonly _tag: "AlreadyMigrated" }
-  | { readonly _tag: "Copied"; readonly copied: number; readonly kept: number };
+  | { readonly _tag: "GaveUp"; readonly attempts: number }
+  | { readonly _tag: "Copied"; readonly copied: number; readonly skipped: number };
+
+/** How many launches have failed so far, or "copied" once the copy is done. */
+export function parseMigrationMarker(text: string | undefined) {
+  const line = text?.trim() ?? "";
+  if (line === "copied") return "copied";
+  const failed = /^failed (\d+)$/.exec(line);
+  return failed ? Number(failed[1]) : 0;
+}
 
 const serveBlankPage = () =>
   new Response(BLANK_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -73,11 +84,17 @@ export const migrateLegacyRendererStorage = Effect.fn("desktop.fork.migrateRende
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const markerPath = path.join(input.userDataPath, MIGRATION_MARKER_FILE);
-    if (yield* fileSystem.exists(markerPath).pipe(Effect.orElseSucceed(() => false))) {
+    const marker = parseMigrationMarker(
+      yield* fileSystem.readFileString(markerPath).pipe(Effect.orElseSucceed(() => undefined)),
+    );
+    if (marker === "copied") {
       return { _tag: "AlreadyMigrated" } satisfies ForkRendererStorageMigrationResult;
     }
+    if (marker >= MAX_MIGRATION_ATTEMPTS) {
+      return { _tag: "GaveUp", attempts: marker } satisfies ForkRendererStorageMigrationResult;
+    }
 
-    const attempt = (step: string) => (cause: unknown) =>
+    const failedAt = (step: string) => (cause: unknown) =>
       new ForkRendererStorageMigrationError({ step, cause });
 
     const result = yield* Effect.scoped(
@@ -86,7 +103,7 @@ export const migrateLegacyRendererStorage = Effect.fn("desktop.fork.migrateRende
           yield* Effect.acquireRelease(
             Effect.try({
               try: () => Electron.protocol.handle(scheme, serveBlankPage),
-              catch: attempt(`serve ${scheme}`),
+              catch: failedAt(`serve ${scheme}`),
             }),
             () => Effect.sync(() => Electron.protocol.unhandle(scheme)),
           );
@@ -97,7 +114,7 @@ export const migrateLegacyRendererStorage = Effect.fn("desktop.fork.migrateRende
               new Electron.WebContentsView({
                 webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
               }),
-            catch: attempt("create view"),
+            catch: failedAt("create view"),
           }),
           (view) => Effect.sync(() => view.webContents.close()),
         );
@@ -107,10 +124,10 @@ export const migrateLegacyRendererStorage = Effect.fn("desktop.fork.migrateRende
               await view.webContents.loadURL(`${scheme}://${input.host}/`);
               return (await view.webContents.executeJavaScript(READ_LOCAL_STORAGE)) as unknown;
             },
-            catch: attempt(`read ${scheme}`),
+            catch: failedAt(`read ${scheme}`),
           }).pipe(
             Effect.flatMap((raw) =>
-              decodeStorageEntries(raw).pipe(Effect.mapError(attempt(`decode ${scheme}`))),
+              decodeStorageEntries(raw).pipe(Effect.mapError(failedAt(`decode ${scheme}`))),
             ),
           );
 
@@ -120,26 +137,26 @@ export const migrateLegacyRendererStorage = Effect.fn("desktop.fork.migrateRende
         if (toCopy.length > 0) {
           // JSON is a valid JavaScript expression, so the entries go in as a literal.
           const literal = yield* encodeStorageEntriesJson(toCopy).pipe(
-            Effect.mapError(attempt(`encode ${input.currentScheme}`)),
+            Effect.mapError(failedAt(`encode ${input.currentScheme}`)),
           );
           yield* Effect.tryPromise({
             try: () =>
               view.webContents.executeJavaScript(
                 `for (const [key, value] of ${literal}) window.localStorage.setItem(key, value);`,
               ),
-            catch: attempt(`write ${input.currentScheme}`),
+            catch: failedAt(`write ${input.currentScheme}`),
           });
           // Chromium commits localStorage to disk later. Commit now, so a crash right
           // after this cannot lose the copy once the marker says it is done.
           yield* Effect.try({
             try: () => view.webContents.session.flushStorageData(),
-            catch: attempt("flush storage"),
+            catch: failedAt("flush storage"),
           });
         }
         return {
           _tag: "Copied",
           copied: toCopy.length,
-          kept: legacy.length - toCopy.length,
+          skipped: legacy.length - toCopy.length,
         } satisfies ForkRendererStorageMigrationResult;
       }),
     ).pipe(
@@ -148,11 +165,15 @@ export const migrateLegacyRendererStorage = Effect.fn("desktop.fork.migrateRende
         orElse: () =>
           Effect.fail(new ForkRendererStorageMigrationError({ step: "timeout", cause: null })),
       }),
+      // Count the failure, so the next launches stop after MAX_MIGRATION_ATTEMPTS.
+      Effect.tapError(() =>
+        fileSystem.writeFileString(markerPath, `failed ${marker + 1}\n`).pipe(Effect.ignore),
+      ),
     );
 
     yield* fileSystem
       .writeFileString(markerPath, "copied\n")
-      .pipe(Effect.mapError(attempt("write marker")));
+      .pipe(Effect.mapError(failedAt("write marker")));
     return result;
   },
 );

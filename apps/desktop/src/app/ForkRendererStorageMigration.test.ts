@@ -56,15 +56,22 @@ import {
   migrateLegacyRendererStorage,
   planLegacyStorageCopy,
 } from "./ForkRendererStorageMigration.ts";
+import {
+  DESKTOP_HOST,
+  getDesktopLinkScheme,
+  getDesktopScheme,
+} from "../electron/ElectronProtocol.ts";
 
-const LEGACY = "t3code-fork://app";
-const CURRENT = "t3code://app";
+const LEGACY_SCHEME = getDesktopLinkScheme(false);
+const CURRENT_SCHEME = getDesktopScheme(false);
+const LEGACY = `${LEGACY_SCHEME}://${DESKTOP_HOST}`;
+const CURRENT = `${CURRENT_SCHEME}://${DESKTOP_HOST}`;
 
 const migrate = (userDataPath: string) =>
   migrateLegacyRendererStorage({
-    legacyScheme: "t3code-fork",
-    currentScheme: "t3code",
-    host: "app",
+    legacyScheme: LEGACY_SCHEME,
+    currentScheme: CURRENT_SCHEME,
+    host: DESKTOP_HOST,
     userDataPath,
   });
 
@@ -112,7 +119,7 @@ describe("migrateLegacyRendererStorage", () => {
       origins.set(CURRENT, new Map([["t3code:theme", "light"]]));
 
       const first = yield* migrate(userData);
-      assert.deepStrictEqual(first, { _tag: "Copied", copied: 5, kept: 1 });
+      assert.deepStrictEqual(first, { _tag: "Copied", copied: 5, skipped: 1 });
       const current = origins.get(CURRENT)!;
       assert.equal(current.get("t3code:composer-drafts:v1"), '{"thread-1":"half-written prompt"}');
       assert.equal(current.get("t3code:prompt-stash:v2"), '["stashed"]');
@@ -122,10 +129,10 @@ describe("migrateLegacyRendererStorage", () => {
       assert.equal(current.get("t3code:theme"), "light");
       assert.isTrue(yield* fileSystem.exists(`${userData}/${MIGRATION_MARKER_FILE}`));
       // The blank pages are gone again, so the real renderer handler can register.
-      assert.deepStrictEqual(unhandleMock.mock.calls.map(([scheme]) => scheme).toSorted(), [
-        "t3code",
-        "t3code-fork",
-      ]);
+      assert.deepStrictEqual(
+        unhandleMock.mock.calls.map(([scheme]) => scheme).toSorted(),
+        [CURRENT_SCHEME, LEGACY_SCHEME].toSorted(),
+      );
       assert.equal(closeMock.mock.calls.length, 1);
       // The copy is committed to disk before the marker is written.
       assert.equal(flushMock.mock.calls.length, 1);
@@ -138,17 +145,54 @@ describe("migrateLegacyRendererStorage", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("leaves no marker when the old origin cannot be read, so it retries", () =>
+  it.effect("stops retrying a failing copy after three launches", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const userData = yield* fileSystem.makeTempDirectoryScoped();
+      const markerPath = `${userData}/${MIGRATION_MARKER_FILE}`;
       state.corruptOrigin = LEGACY;
 
-      const exit = yield* Effect.exit(migrate(userData));
-      assert.isTrue(Exit.isFailure(exit));
-      assert.isFalse(yield* fileSystem.exists(`${userData}/${MIGRATION_MARKER_FILE}`));
-      assert.equal(unhandleMock.mock.calls.length, 2);
-      assert.equal(closeMock.mock.calls.length, 1);
+      for (const launch of [1, 2, 3]) {
+        const exit = yield* Effect.exit(migrate(userData));
+        assert.isTrue(Exit.isFailure(exit));
+        assert.equal((yield* fileSystem.readFileString(markerPath)).trim(), `failed ${launch}`);
+      }
+      const pagesLoadedBefore = handleMock.mock.calls.length;
+
+      // The fourth launch skips the copy and opens the window without waiting on it.
+      assert.deepStrictEqual(yield* migrate(userData), { _tag: "GaveUp", attempts: 3 });
+      assert.equal(handleMock.mock.calls.length, pagesLoadedBefore);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("a retry after a failed launch still never overwrites the new origin", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const userData = yield* fileSystem.makeTempDirectoryScoped();
+      origins.set(
+        LEGACY,
+        new Map([
+          ["t3code:composer-drafts:v1", "old draft"],
+          ["t3code:theme", "dark"],
+        ]),
+      );
+      origins.set(CURRENT, new Map([["t3code:theme", "light"]]));
+      state.corruptOrigin = LEGACY;
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(migrate(userData))));
+
+      state.corruptOrigin = "";
+      assert.deepStrictEqual(yield* migrate(userData), {
+        _tag: "Copied",
+        copied: 1,
+        skipped: 1,
+      });
+      const current = origins.get(CURRENT)!;
+      assert.equal(current.get("t3code:composer-drafts:v1"), "old draft");
+      assert.equal(current.get("t3code:theme"), "light");
+      assert.equal(
+        (yield* fileSystem.readFileString(`${userData}/${MIGRATION_MARKER_FILE}`)).trim(),
+        "copied",
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
