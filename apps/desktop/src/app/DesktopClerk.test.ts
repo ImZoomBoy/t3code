@@ -22,6 +22,12 @@ vi.mock("@clerk/electron/storage", () => ({
   storage: storageMock,
 }));
 
+// DesktopClerk lists the privileged schemes again once the bridge exists.
+// DesktopClerk.schemePrivileges.test.ts covers that against the real bridge.
+vi.mock("electron", () => ({
+  protocol: { registerSchemesAsPrivileged: vi.fn() },
+}));
+
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as ElectronApp from "../electron/ElectronApp.ts";

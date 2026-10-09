@@ -129,11 +129,15 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
 
 /**
  * Must run synchronously during process bootstrap, before Electron emits `ready`.
+ *
+ * Fork: Electron keeps the secure, fetch and CORS schemes of the last call only, so
+ * whoever calls last has to list every scheme. The Clerk bridge makes its own call
+ * for the link scheme alone, and DesktopClerk runs this again right after.
  */
-function registerDesktopSchemePrivilegesSync(): void {
+export function registerDesktopSchemePrivilegesSync(): void {
   // Fork: the link schemes are listed too. The storage migration loads a page from
   // the old t3code-fork://app origin, and web storage only exists on a standard
-  // scheme. Electron allows this call once, so every scheme belongs in this list.
+  // scheme.
   Electron.protocol.registerSchemesAsPrivileged(
     [
       DESKTOP_PRODUCTION_SCHEME,
