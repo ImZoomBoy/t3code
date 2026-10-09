@@ -569,6 +569,24 @@
       ],
       "test": "apps/server/src/process/sessionProcessJob.test.ts",
       "patchesUpstream": true
+    },
+    {
+      "name": "claude-plugin-skills",
+      "description": "The Claude skill picker also lists the skills of Claude Code plugins that are installed and enabled, named plugin:skill as the CLI names them, and a pick goes out as /plugin:skill. Web and mobile label these rows Plugin, and a plugin whose one skill repeats its name is shown once.",
+      "keep": "ClaudePluginSkills.ts and its test are ours whole. In ClaudeSkills.ts these survive: the resolveClaudePluginSkillRoots import and call, the plugin scope, the plugin roots and their namespace in the roots list, the plugin:skill name built from the namespace, and the skillOverrides skip for a namespaced skill. In providerSkills.ts the plugin source kind and the repeated-name rule in formatProviderSkillDisplayName survive, with their two tests in providerSkills.test.ts. The plugin entries in the source maps of ComposerCommandMenu.tsx and ComposerCommandPopover.tsx survive. The plugin paragraph under Skills in providers-claude.md survives. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/provider/Drivers/ClaudePluginSkills.ts",
+        "apps/server/src/provider/Drivers/ClaudeSkills.ts",
+        "packages/client-runtime/src/providerSkills.ts",
+        "apps/web/src/components/chat/ComposerCommandMenu.tsx",
+        "apps/mobile/src/features/threads/ComposerCommandPopover.tsx",
+        "docs/user/providers-claude.md"
+      ],
+      "test": [
+        "apps/server/src/provider/Drivers/ClaudePluginSkills.test.ts",
+        "packages/client-runtime/src/providerSkills.test.ts"
+      ],
+      "patchesUpstream": true
     }
   ]
 }

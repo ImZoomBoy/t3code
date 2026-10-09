@@ -53,6 +53,15 @@ describe("formatProviderSkillDisplayName", () => {
       }),
     ).toBe("Review Follow Up");
   });
+
+  it("names a plugin skill once when the plugin and the skill share a name", () => {
+    expect(formatProviderSkillDisplayName({ name: "frontend-design:frontend-design" })).toBe(
+      "Frontend Design",
+    );
+    expect(formatProviderSkillDisplayName({ name: "pdf-viewer:annotate" })).toBe(
+      "Pdf Viewer Annotate",
+    );
+  });
 });
 
 describe("dedupeProviderSkillsByName", () => {
@@ -223,6 +232,15 @@ describe("resolveProviderSkillSourceKind", () => {
         scope: "system",
       }),
     ).toBe("system");
+  });
+
+  it("marks Claude plugin skills as plugin installs", () => {
+    expect(
+      resolveProviderSkillSourceKind({
+        path: "/Users/julius/.claude/plugins/cache/market/alpha/1.0.0/skills/hello/SKILL.md",
+        scope: "plugin",
+      }),
+    ).toBe("plugin");
   });
 
   it("keeps unknown and missing scopes usable", () => {
