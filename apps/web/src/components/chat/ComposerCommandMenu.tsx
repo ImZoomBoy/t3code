@@ -15,6 +15,7 @@ import {
   BlocksIcon,
   FolderIcon,
   PackageIcon,
+  PlugIcon,
   SettingsIcon,
   UserRoundIcon,
   type LucideIcon,
@@ -220,6 +221,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
 
 const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
   app: BlocksIcon,
+  plugin: PlugIcon,
   repo: FolderIcon,
   project: FolderIcon,
   personal: UserRoundIcon,
@@ -229,6 +231,7 @@ const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
 
 const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
   app: "App",
+  plugin: "Plugin",
   repo: "Repo",
   project: "Project",
   personal: "Personal",

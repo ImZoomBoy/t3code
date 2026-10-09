@@ -4,7 +4,14 @@ import type {
   ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 
-export type ProviderSkillSourceKind = "app" | "repo" | "project" | "personal" | "system" | "other";
+export type ProviderSkillSourceKind =
+  | "app"
+  | "plugin"
+  | "repo"
+  | "project"
+  | "personal"
+  | "system"
+  | "other";
 
 function titleCaseWords(value: string): string {
   const words: string[] = [];
@@ -26,7 +33,14 @@ export function formatProviderSkillDisplayName(
   if (displayName) {
     return displayName;
   }
-  return titleCaseWords(skill.name);
+  // Claude Code names a plugin skill `plugin:skill`, and a one-skill plugin
+  // usually repeats itself, as in `frontend-design:frontend-design`.
+  const [namespace, skillName, ...rest] = skill.name.split(":");
+  return titleCaseWords(
+    namespace !== undefined && namespace === skillName && rest.length === 0
+      ? namespace
+      : skill.name,
+  );
 }
 
 export function dedupeProviderSkillsByName(
@@ -83,6 +97,8 @@ export function resolveProviderSkillSourceKind(
 
   const normalizedScope = skill.scope?.trim().toLowerCase();
   switch (normalizedScope) {
+    case "plugin":
+      return "plugin";
     case "repo":
     case "repository":
       return "repo";

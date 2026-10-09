@@ -7,6 +7,8 @@
  * matching the CLI. `.agents/skills` is a Codex location: verified against the
  * CLI, a skill that lives only there is answered with `Unknown command`, so it
  * is not scanned here.
+ * Skills of enabled plugins follow, named `plugin:skill`; `ClaudePluginSkills`
+ * finds their folders.
  * The Agent SDK init handshake surfaces skills only as slash commands without
  * their filesystem paths, so the provider snapshot scans the same locations
  * directly, mirroring how the Codex app-server reports its skills.
@@ -28,8 +30,9 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { parse as parseYamlDocument } from "yaml";
 
 import { expandHomePath } from "../../pathExpansion.ts";
+import { resolveClaudePluginSkillRoots } from "./ClaudePluginSkills.ts";
 
-type ClaudeSkillScope = "user" | "project";
+type ClaudeSkillScope = "user" | "project" | "plugin";
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
@@ -318,9 +321,26 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
   const configDirPath = yield* resolveClaudeConfigDirPath(config, environment ?? process.env, cwd);
   const skillOverrides = yield* readSkillOverrides(configDirPath, cwd, environment ?? process.env);
 
-  const roots: ReadonlyArray<{ directory: string; scope: ClaudeSkillScope }> = [
+  const pluginRoots = yield* resolveClaudePluginSkillRoots({
+    configDirPath,
+    cwd,
+    settingsPaths: skillOverrideSettingsPaths(
+      path,
+      configDirPath,
+      cwd,
+      yield* HostProcessPlatform,
+      environment ?? process.env,
+    ),
+  });
+
+  const roots: ReadonlyArray<{
+    directory: string;
+    scope: ClaudeSkillScope;
+    namespace?: string;
+  }> = [
     { directory: path.join(configDirPath, "skills"), scope: "user" },
     ...(cwd ? [{ directory: path.join(cwd, ".claude", "skills"), scope: "project" as const }] : []),
+    ...pluginRoots.map((root) => ({ ...root, scope: "plugin" as const })),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();
@@ -352,10 +372,11 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
       // `probe-alias`, and only `skillOverrides["probe-alias"]` switches it
       // off. Keying off the frontmatter name would report a command that does
       // not exist and miss the override that disables it.
-      const name = entry.trim();
-      if (!name) {
+      const directoryName = entry.trim();
+      if (!directoryName) {
         continue;
       }
+      const name = root.namespace ? `${root.namespace}:${directoryName}` : directoryName;
 
       // First root wins, so a later root never displaces a higher-precedence
       // skill of the same name.
@@ -363,7 +384,9 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         continue;
       }
 
-      const override = skillOverrides.get(name);
+      // Verified against the CLI: `skillOverrides` leaves a plugin skill on,
+      // under its full name and its bare one alike.
+      const override = root.namespace ? undefined : skillOverrides.get(name);
       const userInvocationOnly =
         (frontmatter.kind === "parsed" && frontmatter.userInvocationOnly === true) ||
         override?.userInvocationOnly === true;

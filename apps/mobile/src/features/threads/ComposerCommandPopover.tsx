@@ -83,6 +83,7 @@ function PopoverSurface(props: { readonly children: React.ReactNode; readonly st
 
 const SKILL_SOURCE_SYMBOL_BY_KIND: Record<ProviderSkillSourceKind, AppSymbolName> = {
   app: "square.grid.2x2",
+  plugin: "square.grid.2x2",
   repo: "folder",
   project: "folder",
   personal: "person.crop.circle",
