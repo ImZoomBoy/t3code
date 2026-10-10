@@ -75,6 +75,7 @@ import {
   formatDesktopSshTarget,
 } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { ForkUnlinkThisPcRow } from "./ForkUnlinkThisPcRow";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
 import { Input } from "../ui/input";
@@ -1683,20 +1684,24 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   const {
     isSignedIn,
     linkState: primaryCloudLinkState,
+    linked,
+    linkedAccountDiffers,
     managedTunnelActive,
     publishAgentActivity,
     operationError,
     reconcileCloudState,
+    unlinkThisPc,
   } = useCloudLinkController();
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
+  const [isUnlinking, setIsUnlinking] = useState(false);
 
   const disabledReason = !isSignedIn
     ? "Sign in to T3 Connect to manage this environment."
     : !canManageRelay
       ? "Your session does not have permission to manage T3 Connect access."
       : null;
-  const isBusy = isUpdating || isUpdatingPreference;
+  const isBusy = isUpdating || isUpdatingPreference || isUnlinking;
 
   const updateManagedTunnel = async (enabled: boolean) => {
     setIsUpdating(true);
@@ -1769,6 +1774,14 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             onCheckedChange={(enabled) => void updatePublishAgentActivity(enabled)}
           />
         }
+      />
+      <ForkUnlinkThisPcRow
+        linked={linked}
+        linkedAccountDiffers={linkedAccountDiffers}
+        canManageRelay={canManageRelay}
+        disabled={primaryCloudLinkState.isPending || isUpdating || isUpdatingPreference}
+        unlinkThisPc={unlinkThisPc}
+        onBusyChange={setIsUnlinking}
       />
     </>
   );
