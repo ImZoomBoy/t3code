@@ -588,6 +588,20 @@
         "packages/client-runtime/src/providerSkills.test.ts"
       ],
       "patchesUpstream": true
+    },
+    {
+      "name": "t3-connect-unlink-this-pc",
+      "description": "Settings > Connections shows an Unlink this PC row whenever the environment holds a T3 Connect link. It clears the link stored on this PC with the local unlink call, needs no relay token and no sign-in to the account that made the link, and still needs the relay:write scope. Upstream only unlinks when a switch that shows ON is turned OFF, so a link with no tunnel and publishing off, or one made under another account, could not be removed. The different-account conflict error names the row, and the row says so when the stored link belongs to another account than the one signed in.",
+      "keep": "forkUnlinkThisPc.ts, its test and ForkUnlinkThisPcRow.tsx are ours whole. In useCloudLinkController.ts these survive: the describeCloudLinkFailure call around the failure message, the useForkUnlinkThisPc call, and linkedAccountDiffers and unlinkThisPc in the returned object. In ConnectionsSettings.tsx these survive: the ForkUnlinkThisPcRow import, the row rendered after the Publish agent activity row in ConfiguredCloudLinkRow, and the isUnlinking state that feeds isBusy. The Unlink this PC paragraph under Manage or revoke access in remote-access.md survives. Everything else in those three files takes upstream.",
+      "files": [
+        "apps/web/src/cloud/forkUnlinkThisPc.ts",
+        "apps/web/src/components/settings/ForkUnlinkThisPcRow.tsx",
+        "apps/web/src/cloud/useCloudLinkController.ts",
+        "apps/web/src/components/settings/ConnectionsSettings.tsx",
+        "docs/user/remote-access.md"
+      ],
+      "test": "apps/web/src/cloud/forkUnlinkThisPc.test.tsx",
+      "patchesUpstream": true
     }
   ]
 }

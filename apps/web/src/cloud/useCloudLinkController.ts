@@ -10,6 +10,7 @@ import { useState } from "react";
 import { toastManager } from "../components/ui/toast";
 import { relayEnvironmentDiscovery } from "../state/relay";
 import { useAtomCommand } from "../state/use-atom-command";
+import { describeCloudLinkFailure, useForkUnlinkThisPc } from "./forkUnlinkThisPc";
 import {
   linkPrimaryEnvironment as linkPrimaryEnvironmentAtom,
   unlinkPrimaryEnvironment as unlinkPrimaryEnvironmentAtom,
@@ -51,7 +52,9 @@ export function useCloudLinkController() {
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const reportUpdateFailure = (cause: unknown) => {
-    const message = cause instanceof Error ? cause.message : "Could not update T3 Connect access.";
+    const message = describeCloudLinkFailure(
+      cause instanceof Error ? cause.message : "Could not update T3 Connect access.",
+    );
     const traceId = findErrorTraceId(cause);
     console.error("[t3-connect] Could not update T3 Connect", { message, traceId, cause });
     setOperationError(traceId ? `${message} Trace ID: ${traceId}` : message);
@@ -76,6 +79,12 @@ export function useCloudLinkController() {
     primaryCloudLinkState.data?.managedTunnelActive ?? primaryCloudLinkState.data?.linked ?? false;
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
   const linked = primaryCloudLinkState.data?.linked ?? false;
+  // Fork: an unlink that does not depend on what the switches show.
+  const { linkedAccountDiffers, unlinkThisPc } = useForkUnlinkThisPc({
+    linkState: primaryCloudLinkState,
+    clearFailure: () => setOperationError(null),
+    reportFailure: reportUpdateFailure,
+  });
 
   const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
     setOperationError(null);
@@ -155,9 +164,11 @@ export function useCloudLinkController() {
     isSignedIn,
     linkState: primaryCloudLinkState,
     linked,
+    linkedAccountDiffers,
     managedTunnelActive,
     publishAgentActivity,
     operationError,
     reconcileCloudState,
+    unlinkThisPc,
   };
 }
