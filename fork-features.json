@@ -133,8 +133,8 @@
     },
     {
       "name": "fork-connect-renderer-origin",
-      "description": "T3 Connect sign-in works in the fork. T3's production Clerk instance accepts t3code://app and rejects t3code-fork://app with origin_invalid, so the renderer is served from upstream's t3code scheme while the Clerk bridge, the installer and the Linux desktop entry keep the fork's t3code-fork link scheme. On first launch ForkRendererStorageMigration.ts copies localStorage (drafts, prompt stash, themes, sidebar and second mate folds) from the old t3code-fork://app origin to t3code://app. ForkRendererStorageMigration.ts is the fork's own module and upstream has no file at that path, so its test cannot pass on plain upstream.",
-      "keep": "ForkRendererStorageMigration.ts is ours whole. getDesktopLinkScheme, the link schemes in the privileged scheme list and the comments on them survive in ElectronProtocol.ts; DesktopClerk.ts, DesktopLinuxUrlHandler.ts and DesktopPreReadyPlatform.ts pass getDesktopLinkScheme where upstream passes getDesktopScheme; the migration call before registerDesktopProtocol survives in DesktopApp.ts; the Google and GitHub sign-in note survives in the doc; everything else in those files takes upstream.",
+      "description": "T3 Connect sign-in works in the fork. T3's production Clerk instance accepts t3code://app and rejects t3code-fork://app with origin_invalid, so the renderer is served from upstream's t3code scheme while the Clerk bridge, the installer and the Linux desktop entry keep the fork's t3code-fork link scheme. On first launch ForkRendererStorageMigration.ts copies localStorage (drafts, prompt stash, themes, sidebar and second mate folds) from the old t3code-fork://app origin to t3code://app. The Clerk bridge registers its link scheme as privileged on its own, and Electron keeps the secure, fetch and CORS schemes of the last call only, so DesktopClerk.ts lists every scheme again right after creating the bridge. Without that t3code://app is not a secure context, crypto.subtle is undefined and every T3 Connect relay call fails. ForkRendererStorageMigration.ts is the fork's own module and upstream has no file at that path, so its test cannot pass on plain upstream.",
+      "keep": "ForkRendererStorageMigration.ts is ours whole. getDesktopLinkScheme, the link schemes in the privileged scheme list and the comments on them survive in ElectronProtocol.ts; DesktopClerk.ts, DesktopLinuxUrlHandler.ts and DesktopPreReadyPlatform.ts pass getDesktopLinkScheme where upstream passes getDesktopScheme; registerDesktopSchemePrivilegesSync stays exported from ElectronProtocol.ts and DesktopClerk.ts calls it right after createClerkBridge; the migration call before registerDesktopProtocol survives in DesktopApp.ts; the Google and GitHub sign-in note survives in the doc; everything else in those files takes upstream.",
       "files": [
         "apps/desktop/src/app/ForkRendererStorageMigration.ts",
         "apps/desktop/src/electron/ElectronProtocol.ts",
@@ -146,7 +146,8 @@
       ],
       "test": [
         "apps/desktop/src/app/ForkRendererStorageMigration.test.ts",
-        "apps/desktop/src/electron/ElectronProtocol.test.ts"
+        "apps/desktop/src/electron/ElectronProtocol.test.ts",
+        "apps/desktop/src/app/DesktopClerk.schemePrivileges.test.ts"
       ],
       "patchesUpstream": true
     },

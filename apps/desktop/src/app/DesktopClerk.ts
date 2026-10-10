@@ -73,7 +73,7 @@ export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHos
 );
 
 function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
-  return createClerkBridge({
+  const bridge = createClerkBridge({
     storage: storage({ path: stateDir }),
     passkeys: true,
     // Fork: the bridge registers this scheme as the OS link handler and uses it for
@@ -85,6 +85,13 @@ function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
       host: ElectronProtocol.DESKTOP_HOST,
     },
   });
+  // Fork: the bridge just registered that link scheme as privileged, and Electron
+  // keeps the secure, fetch and CORS schemes of the last call only. Upstream passes
+  // the renderer scheme, so its window stays a secure context. Ours would not:
+  // t3code://app would lose crypto.subtle, which T3 Connect needs for its relay
+  // keys. List every scheme again, in the same synchronous step, before `ready`.
+  ElectronProtocol.registerDesktopSchemePrivilegesSync();
+  return bridge;
 }
 
 /** @public Service construction is part of the canonical Effect module API. */
