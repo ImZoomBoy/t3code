@@ -158,6 +158,11 @@ page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped.
 
+If switching T3 Connect on fails because this PC is already linked to a
+different T3 Connect account, open **Settings → Connections** on the host and
+choose **Unlink this PC**, then switch T3 Connect on again. It removes the link
+stored on the PC and needs no sign-in to the account that made it.
+
 On a command-line host, `t3 connect unlink` disables exposure while retaining
 your login; `t3 connect logout` also clears that login. Background-service
 [removal](./background-service.md#manage-the-service) is separate.
