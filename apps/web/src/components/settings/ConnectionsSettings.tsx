@@ -1688,7 +1688,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     managedTunnelActive,
     publishAgentActivity,
     operationError,
-    reconcileCloudState,
+    reconcileSettingsSwitches: reconcileCloudState,
     unlinkOffer,
     unlinkThisPc,
   } = useCloudLinkController();

@@ -83,6 +83,7 @@ export type EnvironmentOperationForbiddenReason = typeof EnvironmentOperationFor
 
 // Fork: why a 409 was returned, so clients match a value and not the message.
 export const EnvironmentConflictReason = Schema.Literals(["linked_to_different_cloud_account"]);
+export type EnvironmentConflictReason = typeof EnvironmentConflictReason.Type;
 
 export const EnvironmentInternalErrorReason = Schema.Literals([
   "bootstrap_validation_failed",
@@ -282,7 +283,9 @@ export class EnvironmentHttpConflictError extends Schema.TaggedError<Environment
   "EnvironmentHttpConflictError",
   {
     message: Schema.String,
-    reason: Schema.optionalKey(EnvironmentConflictReason),
+    // An EnvironmentConflictReason. A plain string on the wire, so a client
+    // still decodes the error when a newer server sends a reason it does not know.
+    reason: Schema.optionalKey(Schema.String),
   },
   { httpApiStatus: 409 },
 ) {

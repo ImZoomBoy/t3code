@@ -3,18 +3,28 @@ import {
   EnvironmentHttpConflictError,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { act, useLayoutEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+const primaryTarget = {
+  environmentId: "primary",
+  label: "Primary",
+  httpBaseUrl: "http://localhost:3773",
+  wsBaseUrl: "ws://localhost:3773/ws",
+};
+
 const testState = vi.hoisted(() => ({
   signedInUserId: null as string | null,
+  target: null as typeof primaryTarget | null,
   linkState: null as EnvironmentCloudLinkStateResult | null,
   linkError: null as string | null,
   getToken: vi.fn<() => Promise<string | null>>(),
   link: vi.fn(),
   unlink: vi.fn(),
+  revoke: vi.fn(),
   preferences: vi.fn(),
   refreshDiscovery: vi.fn(),
   refreshLink: vi.fn(),
@@ -33,6 +43,7 @@ vi.mock("../state/relay", () => ({
   relayEnvironmentDiscovery: { refresh: testState.refreshDiscovery },
 }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
+vi.mock("./forkRevokeRelayLink", () => ({ revokeRelayLinkAfterLocalUnlink: testState.revoke }));
 vi.mock("./linkEnvironmentAtoms", () => ({
   linkPrimaryEnvironment: testState.link,
   unlinkPrimaryEnvironment: testState.unlink,
@@ -40,7 +51,7 @@ vi.mock("./linkEnvironmentAtoms", () => ({
 }));
 vi.mock("./primaryCloudLinkState", () => ({
   usePrimaryCloudLinkState: () => ({
-    target,
+    target: testState.target,
     data: testState.linkState,
     error: testState.linkError,
     isPending: false,
@@ -51,12 +62,7 @@ vi.mock("./publicConfig", () => ({ resolveRelayClerkTokenOptions: () => ({}) }))
 
 import { useCloudLinkController } from "./useCloudLinkController";
 
-const target = {
-  environmentId: "primary",
-  label: "Primary",
-  httpBaseUrl: "http://localhost:3773",
-  wsBaseUrl: "ws://localhost:3773/ws",
-};
+const target = primaryTarget;
 
 // A link is stored, but there is no managed tunnel and publishing is off, so
 // both switches show OFF.
@@ -86,20 +92,35 @@ function linkFailure(message: string, cause: unknown) {
   return AsyncResult.failure(Cause.fail(new Error(message, { cause })));
 }
 
-const accountConflict = () =>
+const decodeConflict = Schema.decodeUnknownSync(EnvironmentHttpConflictError);
+
+// Decoded from the 409 body as it arrives on the wire.
+const conflict = (reason?: string) =>
   linkFailure(
     `Could not configure environment relay access: ${CONFLICT_MESSAGE}`,
-    new EnvironmentHttpConflictError({
+    decodeConflict({
+      _tag: "EnvironmentHttpConflictError",
       message: CONFLICT_MESSAGE,
-      reason: "linked_to_different_cloud_account",
+      ...(reason === undefined ? {} : { reason }),
     }),
   );
+const accountConflict = () => conflict("linked_to_different_cloud_account");
 
 const unlinkedToast = expect.objectContaining({ type: "success", title: "This PC is unlinked" });
-const stillListedWarning = expect.objectContaining({
+const otherAccountWarning = expect.objectContaining({
   type: "warning",
-  description: expect.stringContaining("sign in as that account and choose Deregister"),
+  title: "Another account still lists this PC",
 });
+const signedOutWarning = expect.objectContaining({
+  type: "warning",
+  title: "T3 Connect still lists this PC",
+  description: expect.stringContaining("You are signed out of T3 Connect"),
+});
+const ownAccountWarning = expect.objectContaining({
+  type: "warning",
+  title: "T3 Connect may still list this PC",
+});
+const anyWarning = expect.objectContaining({ type: "warning" });
 
 let renderer: ReactTestRenderer | null = null;
 let controller: ReturnType<typeof useCloudLinkController> | null = null;
@@ -120,21 +141,40 @@ async function mountController() {
   return controller;
 }
 
+// Renders again after the account, the environment or the link state changed.
+async function rerender() {
+  await act(() => renderer?.update(<ControllerProbe />));
+}
+
 function mounted() {
   if (controller === null) throw new Error("Controller is not mounted.");
   return controller;
 }
 
+// Runs a request, then lets the task that adds the unlink toasts run.
+async function request(run: () => Promise<boolean>) {
+  let ok = false;
+  await act(async () => {
+    ok = await run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  return ok;
+}
+
+const unlinkThisPc = () => request(() => mounted().unlinkThisPc());
+
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   testState.signedInUserId = "account-signed-in";
+  testState.target = primaryTarget;
   testState.linkState = linkedWithBothSwitchesOff;
   testState.linkError = null;
   testState.getToken.mockReset().mockResolvedValue("clerk-token");
   for (const command of [
     testState.link,
     testState.unlink,
+    testState.revoke,
     testState.preferences,
     testState.refreshDiscovery,
   ]) {
@@ -160,15 +200,13 @@ describe("unlink this PC", () => {
     expect(stuck.publishAgentActivity).toBe(false);
     expect(stuck.linkedAccountDiffers).toBe(true);
 
-    let unlinked = false;
-    await act(async () => {
-      unlinked = await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(true);
 
-    expect(unlinked).toBe(true);
-    // The signed-in account's token goes along, so the relay can drop the entry
-    // that account's refused link attempts left behind.
-    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({
+    // The local unlink carries no token. The revoke follows with the signed-in
+    // account's token, so the relay can drop the entry that account's refused
+    // link attempts left behind.
+    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
+    expect(testState.revoke).toHaveBeenCalledExactlyOnceWith({
       target,
       clerkToken: "clerk-token",
     });
@@ -176,87 +214,86 @@ describe("unlink this PC", () => {
     expect(testState.preferences).not.toHaveBeenCalled();
     expect(testState.refreshLink).toHaveBeenCalled();
     expect(testState.toast).toHaveBeenCalledWith(unlinkedToast);
-    expect(testState.toast).toHaveBeenCalledWith(stillListedWarning);
+    expect(testState.toast).toHaveBeenCalledWith(otherAccountWarning);
   });
 
-  it("unlinks a PC linked under another account when the relay token cannot be read", async () => {
-    testState.getToken.mockRejectedValue(new Error("token read failed"));
+  it("unlinks when the relay token read never settles", async () => {
+    testState.getToken.mockReturnValue(new Promise(() => undefined));
     await mountController();
 
-    let unlinked = false;
-    await act(async () => {
-      unlinked = await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(true);
 
-    expect(unlinked).toBe(true);
     expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
-    expect(testState.toast).toHaveBeenCalledWith(stillListedWarning);
+    expect(testState.revoke).not.toHaveBeenCalled();
+    expect(testState.toast).toHaveBeenCalledWith(unlinkedToast);
+    expect(testState.toast).toHaveBeenCalledWith(otherAccountWarning);
   });
 
-  it("unlinks while signed out of T3 Connect", async () => {
+  it("unlinks while signed out and does not call the linking account another account", async () => {
     testState.signedInUserId = null;
     const signedOut = await mountController();
     expect(signedOut.linkedAccountDiffers).toBe(false);
 
-    let unlinked = false;
-    await act(async () => {
-      unlinked = await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(true);
 
-    expect(unlinked).toBe(true);
     expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
     expect(testState.getToken).not.toHaveBeenCalled();
+    expect(testState.revoke).not.toHaveBeenCalled();
     expect(testState.refreshDiscovery).not.toHaveBeenCalled();
-    // Nothing was revoked at the relay, so the linking account keeps its entry.
-    expect(testState.toast).toHaveBeenCalledWith(stillListedWarning);
+    expect(testState.toast).toHaveBeenCalledWith(signedOutWarning);
+    expect(testState.toast).not.toHaveBeenCalledWith(otherAccountWarning);
   });
 
-  it("also revokes at the relay when the signed-in account made the link", async () => {
+  it("revokes at the relay without a warning when the signed-in account made the link", async () => {
     testState.signedInUserId = "account-that-linked";
     const sameAccount = await mountController();
     expect(sameAccount.linkedAccountDiffers).toBe(false);
 
-    await act(async () => {
-      await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(true);
 
-    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({
+    expect(testState.revoke).toHaveBeenCalledExactlyOnceWith({
       target,
       clerkToken: "clerk-token",
     });
     expect(testState.toast).toHaveBeenCalledExactlyOnceWith(unlinkedToast);
   });
 
-  it("still unlinks locally when the relay token cannot be read", async () => {
+  it("says the user's own account may still list this PC when the revoke fails", async () => {
+    testState.signedInUserId = "account-that-linked";
+    testState.revoke.mockResolvedValue(linkFailure("unlink relay environment failed", null));
+    await mountController();
+
+    expect(await unlinkThisPc()).toBe(true);
+
+    expect(testState.toast).toHaveBeenCalledWith(unlinkedToast);
+    expect(testState.toast).toHaveBeenCalledWith(ownAccountWarning);
+  });
+
+  it("says the user's own account may still list this PC when the relay token cannot be read", async () => {
     testState.signedInUserId = "account-that-linked";
     testState.getToken.mockRejectedValue(new Error("token read failed"));
     await mountController();
 
-    let unlinked = false;
-    await act(async () => {
-      unlinked = await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(true);
 
-    expect(unlinked).toBe(true);
     expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
+    expect(testState.revoke).not.toHaveBeenCalled();
+    expect(testState.toast).toHaveBeenCalledWith(ownAccountWarning);
   });
 
   it("reports a failed unlink and leaves the link in place", async () => {
     testState.unlink.mockResolvedValue(
-      AsyncResult.failure(Cause.fail(new Error("Could not unlink the environment from cloud."))),
+      linkFailure("Could not unlink the environment from cloud.", null),
     );
     await mountController();
 
-    let unlinked = true;
-    await act(async () => {
-      unlinked = await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(false);
 
-    expect(unlinked).toBe(false);
     expect(mounted().operationError).toBe("Could not unlink the environment from cloud.");
     expect(testState.refreshLink).toHaveBeenCalled();
+    expect(testState.revoke).not.toHaveBeenCalled();
     expect(testState.toast).not.toHaveBeenCalledWith(unlinkedToast);
-    expect(testState.toast).not.toHaveBeenCalledWith(stillListedWarning);
+    expect(testState.toast).not.toHaveBeenCalledWith(anyWarning);
   });
 
   it("offers the unlink when the link state cannot be read, without claiming a link", async () => {
@@ -266,12 +303,8 @@ describe("unlink this PC", () => {
     expect(unreadable.linked).toBe(false);
     expect(unreadable.unlinkOffer).toBe("unknown");
 
-    let unlinked = false;
-    await act(async () => {
-      unlinked = await mounted().unlinkThisPc();
-    });
+    expect(await unlinkThisPc()).toBe(true);
 
-    expect(unlinked).toBe(true);
     expect(testState.unlink).toHaveBeenCalledOnce();
     expect(testState.toast).toHaveBeenCalledExactlyOnceWith({
       type: "success",
@@ -285,8 +318,15 @@ describe("unlink this PC", () => {
 
     expect((await mountController()).unlinkOffer).toBe("none");
   });
+});
 
-  it("points the different-account conflict at the unlink control by its typed reason", async () => {
+describe("different-account conflict", () => {
+  const switchTunnelOn = () =>
+    act(async () => {
+      await mounted().reconcileCloudState({ managedTunnel: true, publish: false });
+    });
+
+  it("points at the unlink control by its typed reason", async () => {
     // Reworded on purpose: the hint must not depend on the server's prose.
     testState.link.mockResolvedValue(
       linkFailure(
@@ -299,12 +339,8 @@ describe("unlink this PC", () => {
     );
     await mountController();
 
-    let linked = true;
-    await act(async () => {
-      linked = await mounted().reconcileCloudState({ managedTunnel: true, publish: false });
-    });
+    await switchTunnelOn();
 
-    expect(linked).toBe(false);
     expect(testState.link).toHaveBeenCalledOnce();
     expect(mounted().operationError).toContain('Use "Unlink this PC" in Settings > Connections');
     expect(testState.toast).toHaveBeenCalledWith(
@@ -317,34 +353,34 @@ describe("unlink this PC", () => {
 
   it("shows an older server's conflict as the server worded it", async () => {
     // A server that predates the typed reason sends the message alone.
-    testState.link.mockResolvedValue(
-      linkFailure(
-        `Could not configure environment relay access: ${CONFLICT_MESSAGE}`,
-        new EnvironmentHttpConflictError({ message: CONFLICT_MESSAGE }),
-      ),
-    );
+    testState.link.mockResolvedValue(conflict());
     await mountController();
 
-    await act(async () => {
-      await mounted().reconcileCloudState({ managedTunnel: true, publish: false });
-    });
+    await switchTunnelOn();
 
     expect(mounted().operationError).toBe(
       `Could not configure environment relay access: ${CONFLICT_MESSAGE}`,
     );
   });
 
-  it("clears a shown conflict once the PC is unlinked", async () => {
+  it("shows a newer server's unknown reason as the server worded it", async () => {
+    testState.link.mockResolvedValue(conflict("a_reason_added_later"));
+    await mountController();
+
+    await switchTunnelOn();
+
+    expect(mounted().operationError).toBe(
+      `Could not configure environment relay access: ${CONFLICT_MESSAGE}`,
+    );
+  });
+
+  it("clears once the PC is unlinked", async () => {
     testState.link.mockResolvedValue(accountConflict());
     await mountController();
-    await act(async () => {
-      await mounted().reconcileCloudState({ managedTunnel: true, publish: false });
-    });
+    await switchTunnelOn();
     expect(mounted().operationError).not.toBeNull();
 
-    await act(async () => {
-      await mounted().unlinkThisPc();
-    });
+    await unlinkThisPc();
 
     expect(mounted().operationError).toBeNull();
   });
@@ -353,9 +389,7 @@ describe("unlink this PC", () => {
     testState.link.mockResolvedValue(linkFailure("Could not obtain environment link proof.", null));
     await mountController();
 
-    await act(async () => {
-      await mounted().reconcileCloudState({ managedTunnel: true, publish: false });
-    });
+    await switchTunnelOn();
 
     expect(mounted().operationError).toBe("Could not obtain environment link proof.");
   });
@@ -364,7 +398,7 @@ describe("unlink this PC", () => {
 // The reported path: the PC is linked under another account and both switches
 // show ON. Switching T3 Connect off first needs a relink, which is refused, so
 // that switch stays ON. Switching publishing off next must still unlink.
-describe("switching both switches off", () => {
+describe("the Settings switches", () => {
   beforeEach(() => {
     testState.linkState = linkedWithBothSwitchesOn;
   });
@@ -372,99 +406,186 @@ describe("switching both switches off", () => {
   // What ConnectionsSettings requests: the switch that moved, plus what the
   // server holds for the other one.
   const switchTunnelOff = () =>
-    mounted().reconcileCloudState({ managedTunnel: false, publish: true });
+    request(() => mounted().reconcileSettingsSwitches({ managedTunnel: false, publish: true }));
   const switchPublishingOff = () =>
-    mounted().reconcileCloudState({ managedTunnel: true, publish: false });
-
-  it("unlinks when this PC refused the tunnel switch-off for another account", async () => {
-    testState.link.mockResolvedValue(accountConflict());
-    await mountController();
-
-    let tunnelOff = true;
-    await act(async () => {
-      tunnelOff = await switchTunnelOff();
-    });
-    expect(tunnelOff).toBe(false);
-    expect(mounted().operationError).toContain('Use "Unlink this PC"');
-    expect(testState.unlink).not.toHaveBeenCalled();
-
-    let publishingOff = false;
-    await act(async () => {
-      publishingOff = await switchPublishingOff();
-    });
-
-    expect(publishingOff).toBe(true);
-    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({
-      target,
-      clerkToken: "clerk-token",
-    });
-    expect(testState.preferences).not.toHaveBeenCalled();
-    expect(mounted().operationError).toBeNull();
-    expect(testState.toast).toHaveBeenCalledWith(unlinkedToast);
-    expect(testState.toast).toHaveBeenCalledWith(stillListedWarning);
-  });
-
-  it("unlinks when the relay refused the tunnel switch-off", async () => {
-    testState.signedInUserId = "account-that-linked";
-    testState.link.mockResolvedValue(
-      linkFailure("https://relay.example.com/v1/client/environment-links failed", null),
-    );
-    await mountController();
-
-    await act(async () => {
-      await switchTunnelOff();
-    });
-    let publishingOff = false;
-    await act(async () => {
-      publishingOff = await switchPublishingOff();
-    });
-
-    expect(publishingOff).toBe(true);
-    expect(testState.unlink).toHaveBeenCalledOnce();
-    expect(testState.preferences).not.toHaveBeenCalled();
-    expect(testState.toast).not.toHaveBeenCalledWith(stillListedWarning);
-  });
-
-  it("keeps the link when publishing goes off without a refused tunnel switch-off", async () => {
-    await mountController();
-
-    await act(async () => {
-      await switchPublishingOff();
-    });
-
+    request(() => mounted().reconcileSettingsSwitches({ managedTunnel: true, publish: false }));
+  const switchLastOff = () =>
+    request(() => mounted().reconcileSettingsSwitches({ managedTunnel: false, publish: false }));
+  const expectLinkKept = () => {
     expect(testState.unlink).not.toHaveBeenCalled();
     expect(testState.preferences).toHaveBeenCalledExactlyOnceWith({
       target,
       publishAgentActivity: false,
     });
-  });
+  };
 
-  it("forgets a refused tunnel switch-off once another request goes through", async () => {
+  it("unlink when this PC refused the T3 Connect switch-off for another account", async () => {
     testState.link.mockResolvedValue(accountConflict());
     await mountController();
 
-    await act(async () => {
-      await switchTunnelOff();
-    });
-    await act(async () => {
-      await mounted().reconcileCloudState({ managedTunnel: true, publish: true });
-    });
-    await act(async () => {
-      await switchPublishingOff();
-    });
-
+    expect(await switchTunnelOff()).toBe(false);
+    expect(mounted().operationError).toContain('Use "Unlink this PC"');
     expect(testState.unlink).not.toHaveBeenCalled();
+
+    expect(await switchPublishingOff()).toBe(true);
+
+    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
+    expect(testState.preferences).not.toHaveBeenCalled();
+    expect(mounted().operationError).toBeNull();
+    expect(testState.toast).toHaveBeenCalledWith(unlinkedToast);
+    expect(testState.toast).toHaveBeenCalledWith(otherAccountWarning);
   });
 
-  it("warns that the linking account still lists this PC when the last switch goes off", async () => {
+  it("still say so when the relay list cannot be refreshed after that unlink", async () => {
+    testState.link.mockResolvedValue(accountConflict());
+    testState.refreshDiscovery.mockResolvedValue(linkFailure("relay list failed", null));
+    await mountController();
+
+    await switchTunnelOff();
+    expect(await switchPublishingOff()).toBe(true);
+
+    expect(testState.toast).toHaveBeenCalledWith(unlinkedToast);
+    expect(testState.toast).toHaveBeenCalledWith(otherAccountWarning);
+  });
+
+  it("keep the link when the T3 Connect switch-off failed for a network error", async () => {
+    testState.link.mockResolvedValue(
+      linkFailure("https://relay.example.com/v1/client/environment-links failed", null),
+    );
+    await mountController();
+
+    expect(await switchTunnelOff()).toBe(false);
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("keep the link when the T3 Connect switch-off failed for a conflict without the typed reason", async () => {
+    testState.link.mockResolvedValue(conflict());
+    await mountController();
+
+    await switchTunnelOff();
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("keep the link when the T3 Connect switch-off failed on the relay token", async () => {
+    testState.getToken.mockRejectedValueOnce(new Error("token read failed"));
+    await mountController();
+
+    expect(await switchTunnelOff()).toBe(false);
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("keep the link when the T3 Connect switch-off failed for a signed-out session", async () => {
+    testState.getToken.mockResolvedValueOnce(null);
+    await mountController();
+
+    expect(await switchTunnelOff()).toBe(false);
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("forget a refused switch-off when the signed-in account changes", async () => {
+    testState.link.mockResolvedValue(accountConflict());
+    await mountController();
+
+    await switchTunnelOff();
+    testState.signedInUserId = "a-third-account";
+    await rerender();
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("forget a refused switch-off when the environment changes", async () => {
+    testState.link.mockResolvedValue(accountConflict());
+    await mountController();
+
+    await switchTunnelOff();
+    testState.target = { ...primaryTarget, environmentId: "another-environment" };
+    await rerender();
+    await switchPublishingOff();
+
+    expect(testState.unlink).not.toHaveBeenCalled();
+    expect(testState.preferences).toHaveBeenCalledOnce();
+  });
+
+  it("forget a refused switch-off when the link state changes", async () => {
+    testState.link.mockResolvedValue(accountConflict());
+    await mountController();
+
+    await switchTunnelOff();
+    testState.linkState = { ...linkedWithBothSwitchesOn, cloudUserId: "relinked-elsewhere" };
+    await rerender();
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("forget a refused switch-off once another request goes through", async () => {
+    testState.link.mockResolvedValue(accountConflict());
+    await mountController();
+
+    await switchTunnelOff();
+    await act(async () => {
+      await mounted().reconcileSettingsSwitches({ managedTunnel: true, publish: true });
+    });
+    testState.preferences.mockClear();
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("keep the link when publishing goes off without a refused switch-off", async () => {
+    await mountController();
+
+    await switchPublishingOff();
+
+    expectLinkKept();
+  });
+
+  it("never carry a refused switch-off into onboarding", async () => {
+    testState.link.mockResolvedValue(accountConflict());
+    await mountController();
+
+    await switchTunnelOff();
+    // ConnectOnboardingDialog applies its selection through reconcileCloudState.
+    await act(async () => {
+      await mounted().reconcileCloudState({ managedTunnel: true, publish: false });
+    });
+
+    expectLinkKept();
+  });
+
+  it("unlink and warn about the other account when the last switch goes off", async () => {
     testState.linkState = { ...linkedWithBothSwitchesOn, publishAgentActivity: false };
     await mountController();
 
-    await act(async () => {
-      await mounted().reconcileCloudState({ managedTunnel: false, publish: false });
-    });
+    expect(await switchLastOff()).toBe(true);
 
-    expect(testState.unlink).toHaveBeenCalledOnce();
-    expect(testState.toast).toHaveBeenCalledExactlyOnceWith(stillListedWarning);
+    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
+    expect(testState.revoke).toHaveBeenCalledExactlyOnceWith({
+      target,
+      clerkToken: "clerk-token",
+    });
+    // The switch adds its own success toast, so only the warning comes from here.
+    expect(testState.toast).toHaveBeenCalledExactlyOnceWith(otherAccountWarning);
+  });
+
+  it("unlink when the last switch goes off and the relay token read never settles", async () => {
+    testState.signedInUserId = "account-that-linked";
+    testState.linkState = { ...linkedWithBothSwitchesOn, publishAgentActivity: false };
+    testState.getToken.mockReturnValue(new Promise(() => undefined));
+    await mountController();
+
+    expect(await switchLastOff()).toBe(true);
+
+    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
+    expect(testState.toast).not.toHaveBeenCalled();
   });
 });
