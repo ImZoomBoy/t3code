@@ -81,6 +81,9 @@ export const EnvironmentOperationForbiddenReason = Schema.Literals([
 ]);
 export type EnvironmentOperationForbiddenReason = typeof EnvironmentOperationForbiddenReason.Type;
 
+// Fork: why a 409 was returned, so clients match a value and not the message.
+export const EnvironmentConflictReason = Schema.Literals(["linked_to_different_cloud_account"]);
+
 export const EnvironmentInternalErrorReason = Schema.Literals([
   "bootstrap_validation_failed",
   "browser_session_issuance_failed",
@@ -279,6 +282,7 @@ export class EnvironmentHttpConflictError extends Schema.TaggedError<Environment
   "EnvironmentHttpConflictError",
   {
     message: Schema.String,
+    reason: Schema.optionalKey(EnvironmentConflictReason),
   },
   { httpApiStatus: 409 },
 ) {

@@ -53,6 +53,7 @@ export function useCloudLinkController() {
 
   const reportUpdateFailure = (cause: unknown) => {
     const message = describeCloudLinkFailure(
+      cause,
       cause instanceof Error ? cause.message : "Could not update T3 Connect access.",
     );
     const traceId = findErrorTraceId(cause);
@@ -80,11 +81,13 @@ export function useCloudLinkController() {
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
   const linked = primaryCloudLinkState.data?.linked ?? false;
   // Fork: an unlink that does not depend on what the switches show.
-  const { linkedAccountDiffers, unlinkThisPc } = useForkUnlinkThisPc({
-    linkState: primaryCloudLinkState,
-    clearFailure: () => setOperationError(null),
-    reportFailure: reportUpdateFailure,
-  });
+  const { carryRefusedTunnelOff, linkedAccountDiffers, unlinkOffer, unlinkThisPc } =
+    useForkUnlinkThisPc({
+      linkState: primaryCloudLinkState,
+      managedTunnelActive,
+      clearFailure: () => setOperationError(null),
+      reportFailure: reportUpdateFailure,
+    });
 
   const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
     setOperationError(null);
@@ -168,7 +171,8 @@ export function useCloudLinkController() {
     managedTunnelActive,
     publishAgentActivity,
     operationError,
-    reconcileCloudState,
+    reconcileCloudState: carryRefusedTunnelOff(reconcileCloudState),
+    unlinkOffer,
     unlinkThisPc,
   };
 }
