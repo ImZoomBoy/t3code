@@ -8,8 +8,9 @@ import { APP_VERSION } from "~/branding";
 // All this surface owns is how it names itself in the trace and which `fetch` it hands over.
 installClientTracing({
   resource: {
-    serviceName: "t3-web",
+    serviceName: "t3code-web",
     attributes: {
+      "service.namespace": "t3code",
       "service.runtime": "t3-web",
       "service.mode": isElectron ? "electron" : "browser",
       "service.version": APP_VERSION,

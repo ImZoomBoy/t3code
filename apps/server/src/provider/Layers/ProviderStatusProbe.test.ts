@@ -55,7 +55,7 @@ import * as ModelManifest from "../ModelManifest.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import type { AnyProviderDriver } from "../ProviderDriver.ts";
 import type { ProviderInstanceRegistryShape } from "../Services/ProviderInstanceRegistry.ts";
-import * as CodexResetCredit from "./codexResetCredit.ts";
+import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
 
@@ -189,7 +189,7 @@ const makeTestLayer = (log: ProbeLog) => {
     Layer.provideMerge(makeHttpClientLayer(log)),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
-    Layer.provideMerge(CodexResetCredit.layerTest),
+    Layer.provideMerge(ResetCreditCoordinator.layerTest),
   );
 };
 

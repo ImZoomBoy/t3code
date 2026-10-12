@@ -122,6 +122,7 @@ export function isAutoSettlementCandidate(thread: OrchestrationThreadShell, now:
   // First Mate collects pull requests from every repository and outlives each
   // of them, so neither a merge nor a quiet spell settles it.
   if (isFirstMateThread(thread)) return false;
+  if (thread.autoSettleDisabledAt != null) return false;
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
   if (thread.session?.status === "starting" || thread.session?.status === "running") return false;
   if (thread.backgroundLiveness != null) return false;
