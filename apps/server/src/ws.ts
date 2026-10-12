@@ -2000,24 +2000,30 @@ const makeWsRpcLayer = (
         }
         const projectId = ProjectId.make(yield* randomUUID);
         return yield* Effect.gen(function* () {
-          const command = yield* normalizeDispatchCommand({
-            type: "project.create",
-            commandId: yield* serverCommandId("scratch-project-create"),
-            projectId,
-            title: "No project",
-            workspaceRoot,
-            createdAt: yield* nowIso,
-          });
+          const command = yield* normalizeDispatchCommand(
+            {
+              type: "project.create",
+              commandId: yield* serverCommandId("scratch-project-create"),
+              projectId,
+              title: "No project",
+              workspaceRoot,
+              createdAt: yield* nowIso,
+            },
+            "client",
+          );
           yield* dispatchNormalizedCommand(command);
           // A dashed chat bubble in neutral gray marks Scratch. Set once at
           // create, so a user's own icon choice is never overwritten.
           yield* dispatchNormalizedCommand(
-            yield* normalizeDispatchCommand({
-              type: "project.meta.update",
-              commandId: yield* serverCommandId("scratch-project-icon"),
-              projectId,
-              projectIcon: { kind: "lucide", name: "message-square-dashed", color: "gray" },
-            }),
+            yield* normalizeDispatchCommand(
+              {
+                type: "project.meta.update",
+                commandId: yield* serverCommandId("scratch-project-icon"),
+                projectId,
+                projectIcon: { kind: "lucide", name: "message-square-dashed", color: "gray" },
+              },
+              "client",
+            ),
           );
           return { projectId };
         }).pipe(
@@ -2054,14 +2060,17 @@ const makeWsRpcLayer = (
           );
           const projectId = ProjectId.make(yield* randomUUID);
           yield* Effect.gen(function* () {
-            const command = yield* normalizeDispatchCommand({
-              type: "project.create",
-              commandId: yield* serverCommandId("project-create-new"),
-              projectId,
-              title: input.name,
-              workspaceRoot: folder.workspaceRoot,
-              createdAt: yield* nowIso,
-            });
+            const command = yield* normalizeDispatchCommand(
+              {
+                type: "project.create",
+                commandId: yield* serverCommandId("project-create-new"),
+                projectId,
+                title: input.name,
+                workspaceRoot: folder.workspaceRoot,
+                createdAt: yield* nowIso,
+              },
+              "client",
+            );
             yield* dispatchNormalizedCommand(command);
           }).pipe(
             // Only a rejected command means no project uses the folder. An

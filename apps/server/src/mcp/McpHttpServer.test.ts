@@ -929,6 +929,7 @@ const FleetTestLayer = McpHttpServer.FleetToolkitRegistrationLive.pipe(
       getUserInputActivity: () => Effect.die("unused"),
       getEventReplayStats: () => Effect.die("unused"),
       getImportedAgentSessionSources: () => Effect.die("unused"),
+      listThreadsWithPullRequests: () => Effect.die("unused"),
       getThreadRuntimeContext: () => Effect.die("unused"),
       getTurnStartMessage: () => Effect.die("unused"),
       getCommandReadModel: () => Effect.die("unused"),

@@ -417,6 +417,7 @@ interface AcpPeerRoute {
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly configOptionsRef: Ref.Ref<ReadonlyArray<EffectAcpSchema.SessionConfigOption>>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallTrackedState>>;
+  readonly shownToolCallIds: Set<string>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
 }
 
@@ -699,6 +700,7 @@ export const make = (
               modeStateRef: route.modeStateRef,
               configOptionsRef: route.configOptionsRef,
               toolCallsRef: route.toolCallsRef,
+              shownToolCallIds: route.shownToolCallIds,
               assistantSegmentRef: route.assistantSegmentRef,
               // Not this runtime's id: see PEER_ASSISTANT_ITEM_RUNTIME_ID.
               assistantItemRuntimeId: PEER_ASSISTANT_ITEM_RUNTIME_ID,
@@ -936,6 +938,7 @@ export const make = (
           modeStateRef: yield* Ref.make<AcpSessionModeState | undefined>(undefined),
           configOptionsRef: yield* Ref.make(sessionConfigOptionsFromSetup(undefined)),
           toolCallsRef: yield* Ref.make(new Map<string, AcpToolCallTrackedState>()),
+          shownToolCallIds: new Set<string>(),
           assistantSegmentRef: yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 }),
         } satisfies AcpPeerRoute;
         // Claiming the route before the request is what makes the replay

@@ -193,6 +193,8 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     getSettings: settings.getSettings,
     streamSettings: settings.streamChanges,
     haveSettingsChanged: () => false,
+    // Probe gate, as in CodexDriver: a disabled instance never spawns its CLI.
+    isEnabled: () => enabled,
     initialSnapshot: () => pending,
     checkProvider: check,
   }).pipe(

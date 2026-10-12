@@ -65,6 +65,7 @@ vi.mock("@clerk/electron/storage", () => ({
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
@@ -87,6 +88,11 @@ const makeStartupLayer = (isDevelopment: boolean) => {
       Layer.mergeAll(
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
+        Layer.succeed(ElectronShell.ElectronShell, {
+          openExternal: () => Effect.succeed(true),
+          openSystemSettings: () => Effect.succeed(false),
+          copyText: () => Effect.void,
+        }),
         FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
       ),
     ),

@@ -159,6 +159,7 @@ function skillItems(skills: ReadonlyArray<ServerProviderSkill>): ComposerCommand
 function renderSkillMenu(skills: ReadonlyArray<ServerProviderSkill>): string {
   return renderToStaticMarkup(
     <ComposerCommandMenu
+      listId="test-suggestions"
       items={skillItems(skills)}
       resolvedTheme="dark"
       isLoading={false}
