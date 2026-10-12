@@ -181,6 +181,7 @@ import { Checkbox } from "./ui/checkbox";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
+import { offersSessionRestart } from "./readOnlyThread.logic";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
@@ -1973,7 +1974,7 @@ function OpenCommandPaletteDialog(props: {
     }
   }
 
-  if (activeThread !== null) {
+  if (activeThread !== null && offersSessionRestart(activeThread)) {
     const thread = activeThread;
     actionItems.push({
       kind: "action",
