@@ -20,7 +20,7 @@
     {
       "name": "fork-desktop-build",
       "description": "The desktop build stages the fork's app id, product name and installer file name, and reads its update source from T3CODE_DESKTOP_UPDATE_REPOSITORY. scripts/release-smoke.ts also carries the fork's fix for running the release-only shell steps under Git for Windows bash. Issues #59, #75 and #94.",
-      "keep": "Our app id, product name, installer file name, the T3CODE_DESKTOP_UPDATE_REPOSITORY update source and the Git for Windows bash fix in release-smoke.ts replace upstream's; take upstream for the rest of these files, then re-apply those parts on top. The version field in the package.json of apps/desktop, apps/web, apps/server and packages/contracts stays the fork's release version, such as 0.0.43-ap.11, until fork-update.yml writes the next one; everything else in those four files takes upstream.",
+      "keep": "Our app id, product name, installer file name, the T3CODE_DESKTOP_UPDATE_REPOSITORY update source and the Git for Windows bash fix in release-smoke.ts replace upstream's; take upstream for the rest of these files, then re-apply those parts on top. The version field in the package.json of apps/desktop, apps/web, apps/server and packages/contracts stays the fork's release version, such as 0.0.43-ap.11, until fork-update.yml writes the next one; everything else in those four files takes upstream. In the Linux section of build-desktop-artifact.ts the executableName, the link schemes and StartupWMClass stay t3code-fork; a target or field upstream adds there, such as the .deb target, takes upstream.",
       "files": [
         "scripts/build-desktop-artifact.ts",
         "scripts/release-smoke.ts",
@@ -88,7 +88,7 @@
     {
       "name": "fork-repository-identity-read-path",
       "description": "A project's repository identity is resolved off the read path and stored on its projection row, so a snapshot read never runs git. Issue #72.",
-      "keep": "RepositoryIdentityReactor.ts, its service, the 003 fork migration and GitWorkDepth.ts are ours whole, and ProjectionSnapshotQuery.ts must keep serving the stored repository_identity_json column instead of resolving an identity on the read path; take upstream for the rest of ProjectionSnapshotQuery.ts, then re-apply the stored-column reads on top. In RepositoryIdentityResolver.ts the GitWorkDepth permit around each git spawn, the GitWorkDepth requirement in the return types and the GitWorkDepth.layer provide survive; the rest takes upstream. An upstream test that seeds projection_projects with raw SQL and expects a read to resolve an identity is edited to fit: it seeds repository_identity_json and repository_identity_workspace_root, and where it asserted the resolver ran on a read it asserts the resolver did not. ProjectionSnapshotQuery.test.ts (the two sweep tests) and ThreadPullRequestReactor.test.ts (the unsettled read test) carry that edit, with a preferSchemaOverJson exemption on the fixture line.",
+      "keep": "RepositoryIdentityReactor.ts, its service, the 003 fork migration and GitWorkDepth.ts are ours whole, and ProjectionSnapshotQuery.ts must keep serving the stored repository_identity_json column instead of resolving an identity on the read path; take upstream for the rest of ProjectionSnapshotQuery.ts, then re-apply the stored-column reads on top. In RepositoryIdentityResolver.ts the GitWorkDepth permit around each git spawn, the GitWorkDepth requirement in the return types and the GitWorkDepth.layer provide survive; the rest takes upstream. An upstream test that seeds projection_projects with raw SQL and expects a read to resolve an identity is edited to fit: it seeds repository_identity_json and repository_identity_workspace_root, and where it asserted the resolver ran on a read it asserts the resolver did not. ProjectionSnapshotQuery.test.ts (the two sweep tests) and ThreadPullRequestReactor.test.ts (the unsettled read test) carry that edit, with a preferSchemaOverJson exemption on the fixture line. In ws.ts the project.repository-identity-recorded case of the shell stream survives; the rest of ws.ts takes upstream.",
       "files": [
         "apps/server/src/orchestration/Layers/RepositoryIdentityReactor.ts",
         "apps/server/src/orchestration/Services/RepositoryIdentityReactor.ts",
@@ -97,7 +97,8 @@
         "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts",
         "apps/server/src/project/RepositoryIdentityResolver.ts",
         "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts",
-        "apps/server/src/orchestration/ThreadPullRequestReactor.test.ts"
+        "apps/server/src/orchestration/ThreadPullRequestReactor.test.ts",
+        "apps/server/src/ws.ts"
       ],
       "test": "apps/server/src/orchestration/Layers/ShellSnapshotSpawn.test.ts",
       "patchesUpstream": true
@@ -123,14 +124,15 @@
     {
       "name": "fm-worker-threads",
       "description": "First Mate workers show up as read-only threads, with the fork's own migration track behind them. Issue #81.",
-      "keep": "AcpAgentWorkerThreadReactor.ts, AcpAgentWorkerSessions.ts, AcpPeerSessions.ts and ForkMigrations.ts are ours whole, and decider.ts must keep our read-only thread handling; take upstream for the rest of decider.ts, then re-apply the read-only rules on top. In Sqlite.ts the retireLegacyOrderingMigrationRow() call before upstream's migrator and the runForkMigrations() call after it survive; the rest of Sqlite.ts takes upstream.",
+      "keep": "AcpAgentWorkerThreadReactor.ts, AcpAgentWorkerSessions.ts, AcpPeerSessions.ts and ForkMigrations.ts are ours whole, and decider.ts must keep our read-only thread handling; take upstream for the rest of decider.ts, then re-apply the read-only rules on top. In Sqlite.ts the retireLegacyOrderingMigrationRow() call before upstream's migrator and the runForkMigrations() call after it survive; the rest of Sqlite.ts takes upstream. In AcpSessionRuntime.ts the offer sink survives: each peer route hands its events to its own thread through offer and rootEventSink, where upstream writes to one queue. A change upstream makes to the event handling there is re-applied on that sink, and state upstream keeps per session, such as the set of shown tool calls, is kept per route.",
       "files": [
         "apps/server/src/provider/acpAgent/AcpAgentWorkerThreadReactor.ts",
         "apps/server/src/provider/acpAgent/AcpAgentWorkerSessions.ts",
         "apps/server/src/provider/acp/AcpPeerSessions.ts",
         "apps/server/src/persistence/ForkMigrations.ts",
         "apps/server/src/orchestration/decider.ts",
-        "apps/server/src/persistence/Layers/Sqlite.ts"
+        "apps/server/src/persistence/Layers/Sqlite.ts",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts"
       ],
       "test": "apps/server/src/orchestration/decider.readOnly.test.ts",
       "patchesUpstream": true
@@ -305,7 +307,7 @@
     {
       "name": "fm-turn-start-when-busy-environment",
       "description": "A deferred turn start (whenBusy: \"queue\") can carry an environment. The engine keeps it in memory, never on an event or in the deferred-turn-start table, and hands it to the provider reactor when the deferred turn start runs, so the session spawned or restarted for it gets it, as for a direct start. The deferred turn start records only hasEnvironment. After a restart the environment is gone, so the decider drops it with the environment-lost reason instead of running it without it. The decider asks the engine through DeciderContext, a signed-off exception to pure orchestration. The server advertises turnStartWhenBusyEnvironment in its environment capabilities.",
-      "keep": "TurnEnvironment.ts, DeciderContext.ts and deferredTurnStarts.ts are ours whole, including makeDeferredTurnEnvironments and the environment-lost drop in releaseDeferredTurnStart. The hasEnvironment field and the environment-lost drop reason survive in orchestration.ts; the turnStartWhenBusyEnvironment capability survives in environment.ts and ServerEnvironment.ts; and the deferredTurnEnvironments instance, the DeciderContext it provides around decideOrchestrationCommand and its remember call after the commit survive in OrchestrationEngine.ts. Everything else in those files takes upstream.",
+      "keep": "TurnEnvironment.ts, DeciderContext.ts and deferredTurnStarts.ts are ours whole, including makeDeferredTurnEnvironments and the environment-lost drop in releaseDeferredTurnStart. The hasEnvironment field and the environment-lost drop reason survive in orchestration.ts; the turnStartWhenBusyEnvironment capability survives in environment.ts and ServerEnvironment.ts; and the deferredTurnEnvironments instance, the DeciderContext it provides around decideOrchestrationCommand and its remember call after the commit survive in OrchestrationEngine.ts. Everything else in those files takes upstream. In ProviderCommandReactor.ts the environment option of the session start options, withTurnEnvironment, and the threadSpawnEnvironments map that decides a restart on a changed environment survive beside any option upstream adds, such as titleSeed; the rest of that file takes upstream apart from what claude-option-change-keeps-background-work names.",
       "files": [
         "packages/contracts/src/orchestration.ts",
         "packages/contracts/src/environment.ts",
@@ -313,7 +315,8 @@
         "apps/server/src/orchestration/TurnEnvironment.ts",
         "apps/server/src/orchestration/DeciderContext.ts",
         "apps/server/src/orchestration/deferredTurnStarts.ts",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts"
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts"
       ],
       "test": "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts",
       "testName": "defers a turn start that carries an environment and starts it when free|after a restart, drops a deferred turn start whose environment died with the process|does not defer a turn start that carries an environment without whenBusy",
@@ -671,11 +674,12 @@
     {
       "name": "client-trace-exporter-shared",
       "description": "Web and mobile share one client trace exporter, installClientTracing and ClientTracingLive in packages/client-runtime/src/observability/clientTracing.ts, in place of a copy per surface. That module and its test are the fork's own.",
-      "keep": "packages/client-runtime/src/observability/clientTracing.ts and its test are ours whole. apps/web/src/observability/clientTracing.ts stays a thin caller of installClientTracing: take upstream's values, such as the service name and resource attributes, into that call, and do not bring back upstream's own exporter code in that file.",
+      "keep": "packages/client-runtime/src/observability/clientTracing.ts and its test are ours whole. apps/web/src/observability/clientTracing.ts stays a thin caller of installClientTracing: take upstream's values, such as the service name and resource attributes, into that call, and do not bring back upstream's own exporter code in that file. In server.test.ts the web and mobile client tracing resources and the resource parameter of makeBrowserOtlpPayload survive, with the tests that send one payload per surface; the web resource carries upstream's service name.",
       "files": [
         "packages/client-runtime/src/observability/clientTracing.ts",
         "packages/client-runtime/src/observability/clientTracing.test.ts",
-        "apps/web/src/observability/clientTracing.ts"
+        "apps/web/src/observability/clientTracing.ts",
+        "apps/server/src/server.test.ts"
       ],
       "test": "packages/client-runtime/src/observability/clientTracing.test.ts",
       "patchesUpstream": true
@@ -695,13 +699,15 @@
     {
       "name": "thread-deletion-and-archive-queries",
       "description": "Deleting a thread sweeps its checkpoint refs (#24), and a client that asks for an archived thread gets one answer in place of a retry storm (#70). Both read through two query methods the fork added to ProjectionSnapshotQuery: getThreadWorkspaceRoot and getThreadLifecycleById. Every test that mocks the query has to supply them.",
-      "keep": "getThreadWorkspaceRoot and getThreadLifecycleById survive in Services/ProjectionSnapshotQuery.ts, and the checkpoint ref sweep survives in ThreadDeletionReactor.ts with its tests. A test that builds a ProjectionSnapshotQuery mock by hand keeps a line for each of the two methods, in whatever style upstream's mock uses: CheckpointDiffQuery.test.ts and serverRuntimeStartup.test.ts carry them. Everything else in those files takes upstream.",
+      "keep": "getThreadWorkspaceRoot and getThreadLifecycleById survive in Services/ProjectionSnapshotQuery.ts, and the checkpoint ref sweep survives in ThreadDeletionReactor.ts with its tests. A test that builds a ProjectionSnapshotQuery mock by hand keeps a line for each of the two methods, in whatever style upstream's mock uses: CheckpointDiffQuery.test.ts and serverRuntimeStartup.test.ts carry them. Everything else in those files takes upstream. OrchestrationEngine.test.ts and server.test.ts build the same mock by hand and keep the same two lines.",
       "files": [
         "apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts",
         "apps/server/src/orchestration/Layers/ThreadDeletionReactor.ts",
         "apps/server/src/orchestration/Layers/ThreadDeletionReactor.test.ts",
         "apps/server/src/checkpointing/CheckpointDiffQuery.test.ts",
-        "apps/server/src/serverRuntimeStartup.test.ts"
+        "apps/server/src/serverRuntimeStartup.test.ts",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts",
+        "apps/server/src/server.test.ts"
       ],
       "test": "apps/server/src/orchestration/Layers/ThreadDeletionReactor.test.ts",
       "patchesUpstream": true
