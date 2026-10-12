@@ -661,9 +661,11 @@ describe("ThreadPullRequestReactor", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const query = yield* ProjectionSnapshotQuery;
-      yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
-        VALUES ('project', 'Project', '/workspace/project', '[]', ${NOW}, ${NOW}),
-          ('dormant', 'Dormant', '/workspace/dormant', '[]', ${NOW}, ${NOW})`;
+      // The read path serves the identity stored on the row, never the resolver. See #72.
+      const storedIdentityJson = JSON.stringify(project.repositoryIdentity);
+      yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, repository_identity_json, repository_identity_workspace_root, scripts_json, created_at, updated_at)
+        VALUES ('project', 'Project', '/workspace/project', ${storedIdentityJson}, '/workspace/project', '[]', ${NOW}, ${NOW}),
+          ('dormant', 'Dormant', '/workspace/dormant', ${storedIdentityJson}, '/workspace/dormant', '[]', ${NOW}, ${NOW})`;
       yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, branch, branch_pull_request_json, created_at, updated_at, archived_at, settled_override, settled_at)
         VALUES
           ('open', 'project', 'Open', '{"provider":"codex","model":"gpt-5"}', 'full-access', 'default', 'open', NULL, ${NOW}, ${NOW}, NULL, NULL, NULL),

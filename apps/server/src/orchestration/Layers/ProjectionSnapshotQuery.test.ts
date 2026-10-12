@@ -3684,10 +3684,21 @@ it.effect("reads one sweep thread and its projects like the shell snapshot", () 
   return Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const query = yield* ProjectionSnapshotQuery;
-    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
-      VALUES ('p1', 'One', '/one', '[]', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),
-        ('p2', 'Two', '/two', '[]', '2026-09-02T00:00:00Z', '2026-09-02T00:00:00Z'),
-        ('p3', 'Three', '/three', '[]', '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z')`;
+    // The read path serves the identity stored on the row, never the resolver. See #72.
+    const storedIdentityJson = JSON.stringify({
+      canonicalKey: "github.com/acme/web",
+      provider: "github",
+      displayName: "acme/web",
+      locator: {
+        source: "git-remote",
+        remoteName: "origin",
+        remoteUrl: "https://github.com/acme/web.git",
+      },
+    });
+    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, repository_identity_json, repository_identity_workspace_root, scripts_json, created_at, updated_at)
+      VALUES ('p1', 'One', '/one', ${storedIdentityJson}, '/one', '[]', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),
+        ('p2', 'Two', '/two', ${storedIdentityJson}, '/two', '[]', '2026-09-02T00:00:00Z', '2026-09-02T00:00:00Z'),
+        ('p3', 'Three', '/three', ${storedIdentityJson}, '/three', '[]', '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z')`;
     yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, branch, worktree_path, branch_pull_request_json, latest_turn_id, latest_user_message_at, pending_approval_count, snoozed_until, snoozed_at, created_at, updated_at, settled_override, settled_at)
       VALUES
         ('t-linked', 'p1', 'Linked', '{"provider":"codex","model":"gpt-5"}', 'full-access', 'default', 'feature', '/one/wt', NULL, 'turn-1', '2026-09-02T00:00:00Z', 1, NULL, NULL, '2026-09-01T00:00:00Z', '2026-09-02T00:00:00Z', NULL, NULL),
@@ -3793,10 +3804,10 @@ it.effect("reads a full sweep from unsettled threads and every project", () => {
       sweep.threads.map((thread) => thread.id),
       ["t-branch", "t-open", "t-resumed"],
     );
-    // Like the full read, the sweep resolves every project, so it keeps the
-    // repository identity cache warm for client connects.
+    // Like the full read, the sweep returns every project. Neither read runs
+    // the resolver: the identity comes from the project's row. See #72.
     assert.deepStrictEqual(sweep.projects, full.projects);
-    assert.deepStrictEqual(resolved.toSorted(), ["/four", "/one", "/three", "/two"]);
+    assert.deepStrictEqual(resolved, []);
     // A settled thread's link that no longer decodes breaks the full read, but
     // not the sweep, which never reads it.
     yield* sql`UPDATE projection_thread_pull_requests SET snapshot_json = 'invalid-json' WHERE thread_id = 't-settled'`;
