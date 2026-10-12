@@ -54,6 +54,8 @@ const provider: ServerProvider = {
 describe("provider compatibility", () => {
   it("bundles a compatibility policy for every built-in harness", () => {
     for (const builtIn of BUILT_IN_DRIVERS) {
+      // A configurable ACP agent is any binary the user names, so it has no version policy.
+      if (builtIn.driverKind === "acpAgent") continue;
       assert.isDefined(
         resolveProviderCompatibility(
           ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,

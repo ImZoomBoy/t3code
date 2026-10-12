@@ -47,6 +47,7 @@ const UPSTREAM_MIGRATIONS_FROM_38 = [
   { migration_id: 51, name: "ProjectionThreadMessageContext" },
   { migration_id: 52, name: "ProjectionThreadTitleState" },
   { migration_id: 53, name: "PullRequestFilesViewed" },
+  { migration_id: 54, name: "ProjectionThreadsAutoSettleDisabledAt" },
 ];
 
 const EXPECTED_FORK_MIGRATIONS = [
