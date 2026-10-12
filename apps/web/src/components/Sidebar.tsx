@@ -5455,7 +5455,7 @@ export default function Sidebar() {
                                   data-testid="sidebar-start-first-mate"
                                   disabled={startingFirstMate}
                                   onClick={handleStartFirstMate}
-                                  className="flex h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-[var(--sidebar-row-content-inset)] text-left text-sm font-medium outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
+                                  className="flex h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-(--sidebar-row-content-inset) text-left text-sm font-medium outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
                                 >
                                   <FirstMateIcon />
                                   <span className={FIRST_MATE_TONE_CLASS}>
