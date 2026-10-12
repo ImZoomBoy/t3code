@@ -3236,11 +3236,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const replacementBody = yield* responseJsonEffect<{
         readonly _tag?: string;
         readonly message?: string;
+        readonly reason?: string;
       }>(replacementResponse);
 
       assert.equal(firstResponse.status, 200);
       assert.equal(replacementResponse.status, 409);
       assert.equal(replacementBody._tag, "EnvironmentHttpConflictError");
+      assert.equal(replacementBody.reason, "linked_to_different_cloud_account");
       assert.equal(
         replacementBody.message,
         "This environment is already linked to a different cloud account. Unlink it before switching accounts.",

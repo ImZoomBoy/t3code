@@ -6,6 +6,7 @@ import {
   EnvironmentCloudEndpointUnavailableError,
   EnvironmentCloudLinkStateResult,
   EnvironmentCloudRelayConfigResult,
+  type EnvironmentConflictReason,
   EnvironmentHttpApi,
   EnvironmentHttpBadRequestError,
   EnvironmentHttpConflictError,
@@ -240,6 +241,7 @@ function validateLinkedCloudUser(input: {
             new EnvironmentHttpConflictError({
               message:
                 "This environment is already linked to a different cloud account. Unlink it before switching accounts.",
+              reason: "linked_to_different_cloud_account" satisfies EnvironmentConflictReason,
             }),
           );
     }),

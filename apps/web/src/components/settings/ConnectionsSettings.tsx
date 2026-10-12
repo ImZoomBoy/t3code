@@ -1684,12 +1684,12 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   const {
     isSignedIn,
     linkState: primaryCloudLinkState,
-    linked,
     linkedAccountDiffers,
     managedTunnelActive,
     publishAgentActivity,
     operationError,
-    reconcileCloudState,
+    reconcileSettingsSwitches: reconcileCloudState,
+    unlinkOffer,
     unlinkThisPc,
   } = useCloudLinkController();
   const [isUpdating, setIsUpdating] = useState(false);
@@ -1776,7 +1776,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
         }
       />
       <ForkUnlinkThisPcRow
-        linked={linked}
+        offer={unlinkOffer}
         linkedAccountDiffers={linkedAccountDiffers}
         canManageRelay={canManageRelay}
         disabled={primaryCloudLinkState.isPending || isUpdating || isUpdatingPreference}

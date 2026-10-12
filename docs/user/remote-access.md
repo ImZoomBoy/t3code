@@ -161,7 +161,9 @@ offline or has been wiped.
 If switching T3 Connect on fails because this PC is already linked to a
 different T3 Connect account, open **Settings → Connections** on the host and
 choose **Unlink this PC**, then switch T3 Connect on again. It removes the link
-stored on the PC and needs no sign-in to the account that made it.
+stored on the PC and needs no sign-in to the account that made it. If you are
+signed out, or signed in to a different account, the account that made the link
+still lists the PC until you sign in as that account and choose **Deregister**.
 
 On a command-line host, `t3 connect unlink` disables exposure while retaining
 your login; `t3 connect logout` also clears that login. Background-service

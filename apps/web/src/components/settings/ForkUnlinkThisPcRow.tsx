@@ -1,26 +1,25 @@
 import { useState } from "react";
 
-import { UNLINK_THIS_PC_LABEL } from "~/cloud/forkUnlinkThisPc";
+import { UNLINK_THIS_PC_LABEL, type UnlinkThisPcOffer } from "~/cloud/forkUnlinkThisPc";
 
 import { Button } from "../ui/button";
-import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsRow } from "./settingsLayout";
 
 /**
  * Shown under the T3 Connect switches whenever this environment holds a link,
- * whatever the switches show. Needs permission to manage T3 Connect, but not a
- * T3 Connect sign-in.
+ * whatever the switches show, and when the link state could not be read. Needs
+ * permission to manage T3 Connect, but not a T3 Connect sign-in.
  */
 export function ForkUnlinkThisPcRow({
-  linked,
+  offer,
   linkedAccountDiffers,
   canManageRelay,
   disabled,
   unlinkThisPc,
   onBusyChange,
 }: {
-  readonly linked: boolean;
+  readonly offer: UnlinkThisPcOffer;
   readonly linkedAccountDiffers: boolean;
   readonly canManageRelay: boolean;
   readonly disabled: boolean;
@@ -28,19 +27,12 @@ export function ForkUnlinkThisPcRow({
   readonly onBusyChange: (busy: boolean) => void;
 }) {
   const [isUnlinking, setIsUnlinking] = useState(false);
-  if (!linked) return null;
+  if (offer === "none") return null;
 
   const unlink = async () => {
     setIsUnlinking(true);
     onBusyChange(true);
-    const ok = await unlinkThisPc();
-    if (ok) {
-      toastManager.add({
-        type: "success",
-        title: "This PC is unlinked",
-        description: "The T3 Connect link stored on this PC was removed.",
-      });
-    }
+    await unlinkThisPc();
     setIsUnlinking(false);
     onBusyChange(false);
   };
@@ -60,9 +52,11 @@ export function ForkUnlinkThisPcRow({
     <SettingsRow
       title={UNLINK_THIS_PC_LABEL}
       description={
-        linkedAccountDiffers
-          ? "This PC is linked to a different T3 Connect account than the one you are signed in to. Unlink it, then switch T3 Connect on to link it to this account."
-          : "Remove the T3 Connect link stored on this PC. This works without signing in to the account that made the link."
+        offer === "unknown"
+          ? "T3 Code could not read whether this PC holds a T3 Connect link. If it does, this removes it."
+          : linkedAccountDiffers
+            ? "This PC is linked to a different T3 Connect account than the one you are signed in to. Unlink it, then switch T3 Connect on to link it to this account."
+            : "Remove the T3 Connect link stored on this PC. This works without signing in to the account that made the link."
       }
       control={
         canManageRelay ? (
