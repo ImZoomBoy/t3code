@@ -1,5 +1,6 @@
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { offersAutoSettleSwitch } from "@t3tools/client-runtime/fleet-threads";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -134,7 +135,10 @@ export function useThreadActionMenu(input: {
         const now = new Date();
         const supports = {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
-          autoSettleOptOut: readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
+          autoSettleOptOut: offersAutoSettleSwitch(
+            thread,
+            readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
+          ),
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
           pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),

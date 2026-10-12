@@ -33,6 +33,7 @@ import {
   fleetRoleLabel,
   formatModelDisplayName,
   isFirstMateThread,
+  offersAutoSettleSwitch,
   threadDisplayTitle,
 } from "@t3tools/client-runtime/fleet-threads";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
@@ -4647,9 +4648,11 @@ export default function Sidebar() {
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
         const supportsPinning =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning === true;
-        const supportsAutoSettleOptOut =
+        const supportsAutoSettleOptOut = offersAutoSettleSwitch(
+          thread,
           serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadAutoSettleOptOut === true;
+            .threadAutoSettleOptOut === true,
+        );
         const supportsTitleRegeneration =
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadTitleRegeneration === true;

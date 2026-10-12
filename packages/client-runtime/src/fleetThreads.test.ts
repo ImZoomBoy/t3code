@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { fleetRoleLabel, formatModelDisplayName, threadDisplayTitle } from "./fleetThreads.ts";
+import {
+  fleetRoleLabel,
+  formatModelDisplayName,
+  offersAutoSettleSwitch,
+  threadDisplayTitle,
+} from "./fleetThreads.ts";
 
 describe("fleetRoleLabel", () => {
   it("names each fleet role", () => {
@@ -67,5 +72,18 @@ describe("formatModelDisplayName", () => {
 
   it("prefers its own Claude name over a longer catalog name", () => {
     expect(formatModelDisplayName("claude-opus-5-5[1m]", "Claude Opus 5.5")).toBe("Opus 5.5");
+  });
+});
+
+describe("offersAutoSettleSwitch", () => {
+  it("is not offered for First Mate, which the server never auto-settles", () => {
+    expect(offersAutoSettleSwitch({ fleetRole: "first-mate" }, true)).toBe(false);
+  });
+
+  it("follows the server for every other thread", () => {
+    expect(offersAutoSettleSwitch({}, true)).toBe(true);
+    expect(offersAutoSettleSwitch({ fleetRole: "second-mate" }, true)).toBe(true);
+    expect(offersAutoSettleSwitch({ fleetRole: "worker" }, true)).toBe(true);
+    expect(offersAutoSettleSwitch({}, false)).toBe(false);
   });
 });

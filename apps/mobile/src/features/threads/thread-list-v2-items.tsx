@@ -11,7 +11,7 @@ import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import type { ThreadMoveDestination } from "./threadOrder";
-import { threadDisplayTitle } from "@t3tools/client-runtime/fleet-threads";
+import { offersAutoSettleSwitch, threadDisplayTitle } from "@t3tools/client-runtime/fleet-threads";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -675,9 +675,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   // A submenu with the current option checked, matching web. This is a
   // per-thread setting, not a lifecycle verb.
+  const offersAutoSettle = offersAutoSettleSwitch(thread, props.autoSettleOptOutSupported);
   const autoSettleMenuItems = useMemo<MenuAction[]>(
     () =>
-      props.autoSettleOptOutSupported
+      offersAutoSettle
         ? [
             {
               id: "auto-settle",
@@ -698,7 +699,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             } satisfies MenuAction,
           ]
         : [],
-    [props.autoSettleOptOutSupported, thread.autoSettleDisabledAt],
+    [offersAutoSettle, thread.autoSettleDisabledAt],
   );
   const titleMenuItems = useMemo<MenuAction[]>(
     () => [
