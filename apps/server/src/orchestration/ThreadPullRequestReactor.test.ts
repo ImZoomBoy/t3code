@@ -662,6 +662,7 @@ describe("ThreadPullRequestReactor", () => {
       const sql = yield* SqlClient.SqlClient;
       const query = yield* ProjectionSnapshotQuery;
       // The read path serves the identity stored on the row, never the resolver. See #72.
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - Test fixture matches the stored identity column.
       const storedIdentityJson = JSON.stringify(project.repositoryIdentity);
       yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, repository_identity_json, repository_identity_workspace_root, scripts_json, created_at, updated_at)
         VALUES ('project', 'Project', '/workspace/project', ${storedIdentityJson}, '/workspace/project', '[]', ${NOW}, ${NOW}),

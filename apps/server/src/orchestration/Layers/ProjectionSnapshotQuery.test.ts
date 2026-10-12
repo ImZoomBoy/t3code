@@ -3685,6 +3685,7 @@ it.effect("reads one sweep thread and its projects like the shell snapshot", () 
     const sql = yield* SqlClient.SqlClient;
     const query = yield* ProjectionSnapshotQuery;
     // The read path serves the identity stored on the row, never the resolver. See #72.
+    // @effect-diagnostics-next-line preferSchemaOverJson:off - Test fixture matches the stored identity column.
     const storedIdentityJson = JSON.stringify({
       canonicalKey: "github.com/acme/web",
       provider: "github",
