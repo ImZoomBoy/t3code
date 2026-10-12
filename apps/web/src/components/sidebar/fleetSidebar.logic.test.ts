@@ -4,6 +4,7 @@ import { partitionFirstMateThreads } from "../Sidebar.logic";
 import {
   buildFleetRows,
   buildFleetTree,
+  inboxListFor,
   planFirstMateSlot,
   resolveParkedState,
   sidebarSectionFor,
@@ -240,6 +241,83 @@ describe("buildFleetTree", () => {
       ["sm", "snoozed"],
       ["w", null],
     ]);
+  });
+});
+
+describe("upstream's Working section beside the fleet", () => {
+  const busyIds = new Set<string>();
+  const busy = (id: string, fields: Parameters<typeof thread>[1] = {}) => {
+    busyIds.add(id);
+    return thread(id, fields);
+  };
+  /** Every list the sidebar builds, by the same calls in the same order. */
+  const listsFor = (threads: readonly TestThread[], workingSection: boolean) => {
+    const { slot, rest } = partitionFirstMateThreads(threads);
+    const tree = treeFor(rest);
+    const lists: Record<string, string[]> = {
+      firstMate: ids(slot),
+      fleetTree: tree.branches.flatMap((branch) =>
+        ids(branch.secondMate ? [branch.secondMate, ...branch.workers] : branch.workers),
+      ),
+      working: [],
+      active: [],
+      pinned: [],
+      snoozed: [],
+      settled: [],
+    };
+    for (const entry of tree.rest) {
+      const section = sidebarSectionFor(entry, entry.parked);
+      const list =
+        section === "active"
+          ? inboxListFor(entry, { workingSection, busy: busyIds.has(entry.id) })
+          : section;
+      lists[list]!.push(entry.id);
+    }
+    return lists;
+  };
+  const fleet = () => [
+    busy("plain-busy"),
+    thread("plain-idle"),
+    busy("fm", { fleetRole: "first-mate" }),
+    busy("mate", { fleetRole: "second-mate", fleetRepo: "repo" }),
+    busy("worker", { fleetRole: "worker", fleetRepo: "repo" }),
+  ];
+
+  it("folds a busy ordinary thread into Working when the switch is on", () => {
+    const lists = listsFor(fleet(), true);
+    expect(lists.working).toEqual(["plain-busy"]);
+    expect(lists.active).toEqual(["plain-idle"]);
+  });
+
+  it("keeps a busy First Mate, second mate and worker in the fleet, out of Working", () => {
+    const lists = listsFor(fleet(), true);
+    expect(lists.firstMate).toEqual(["fm"]);
+    expect(lists.fleetTree).toEqual(["mate", "worker"]);
+    expect(lists.working).not.toContain("fm");
+    expect(lists.working).not.toContain("mate");
+    expect(lists.working).not.toContain("worker");
+  });
+
+  it("lists a busy worker in Active, not Working, while its second mate is settled", () => {
+    const lists = listsFor(
+      [
+        thread("mate", { fleetRole: "second-mate", fleetRepo: "repo", parked: "settled" }),
+        busy("worker", { fleetRole: "worker", fleetRepo: "repo" }),
+      ],
+      true,
+    );
+    expect(lists.fleetTree).toEqual([]);
+    expect(lists.settled).toEqual(["mate"]);
+    expect(lists.active).toEqual(["worker"]);
+    expect(lists.working).toEqual([]);
+  });
+
+  it("changes nothing with the switch off", () => {
+    const lists = listsFor(fleet(), false);
+    expect(lists.working).toEqual([]);
+    expect(lists.active).toEqual(["plain-busy", "plain-idle"]);
+    expect(lists.firstMate).toEqual(["fm"]);
+    expect(lists.fleetTree).toEqual(["mate", "worker"]);
   });
 });
 

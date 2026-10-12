@@ -20,8 +20,15 @@
     {
       "name": "fork-desktop-build",
       "description": "The desktop build stages the fork's app id, product name and installer file name, and reads its update source from T3CODE_DESKTOP_UPDATE_REPOSITORY. scripts/release-smoke.ts also carries the fork's fix for running the release-only shell steps under Git for Windows bash. Issues #59, #75 and #94.",
-      "keep": "Our app id, product name, installer file name, the T3CODE_DESKTOP_UPDATE_REPOSITORY update source and the Git for Windows bash fix in release-smoke.ts replace upstream's; take upstream for the rest of these files, then re-apply those parts on top.",
-      "files": ["scripts/build-desktop-artifact.ts", "scripts/release-smoke.ts"],
+      "keep": "Our app id, product name, installer file name, the T3CODE_DESKTOP_UPDATE_REPOSITORY update source and the Git for Windows bash fix in release-smoke.ts replace upstream's; take upstream for the rest of these files, then re-apply those parts on top. The version field in the package.json of apps/desktop, apps/web, apps/server and packages/contracts stays the fork's release version, such as 0.0.43-ap.11, until fork-update.yml writes the next one; everything else in those four files takes upstream. In the Linux section of build-desktop-artifact.ts the executableName, the link schemes and StartupWMClass stay t3code-fork; a target or field upstream adds there, such as the .deb target, takes upstream.",
+      "files": [
+        "scripts/build-desktop-artifact.ts",
+        "scripts/release-smoke.ts",
+        "apps/desktop/package.json",
+        "apps/web/package.json",
+        "apps/server/package.json",
+        "packages/contracts/package.json"
+      ],
       "test": "scripts/build-desktop-artifact.test.ts",
       "patchesUpstream": true
     },
@@ -42,11 +49,13 @@
     {
       "name": "terminal-subprocess-poll",
       "description": "Bounded terminal and preview polling on one shared back-off engine: a probe budget held under the poll period, bounded fan-out, a round that backs off when nothing changed and returns to the base period on any event. Issue #83, merged in #106, re-applied on upstream v0.0.39's terminal manager in #125. pollLoop.ts is the fork's own module and upstream has no file at that path, so its test cannot pass on plain upstream.",
-      "keep": "pollLoop.ts is ours whole, and Manager.ts and PortScanner.ts must still drive their polling through it; take upstream for the rest of those two files, then re-apply the pollLoop call sites on top.",
+      "keep": "pollLoop.ts is ours whole, and Manager.ts and PortScanner.ts must still drive their polling through it; take upstream for the rest of those two files, then re-apply the pollLoop call sites on top. The fork's poll round tests in PortScanner.test.ts and Manager.test.ts survive beside any test upstream adds, with the imports both need.",
       "files": [
         "apps/server/src/pollLoop.ts",
         "apps/server/src/terminal/Manager.ts",
-        "apps/server/src/preview/PortScanner.ts"
+        "apps/server/src/preview/PortScanner.ts",
+        "apps/server/src/preview/PortScanner.test.ts",
+        "apps/server/src/terminal/Manager.test.ts"
       ],
       "test": "apps/server/src/pollLoop.test.ts",
       "patchesUpstream": true
@@ -79,13 +88,17 @@
     {
       "name": "fork-repository-identity-read-path",
       "description": "A project's repository identity is resolved off the read path and stored on its projection row, so a snapshot read never runs git. Issue #72.",
-      "keep": "RepositoryIdentityReactor.ts, its service, the 003 fork migration and GitWorkDepth.ts are ours whole, and ProjectionSnapshotQuery.ts must keep serving the stored repository_identity_json column instead of resolving an identity on the read path; take upstream for the rest of ProjectionSnapshotQuery.ts, then re-apply the stored-column reads on top.",
+      "keep": "RepositoryIdentityReactor.ts, its service, the 003 fork migration and GitWorkDepth.ts are ours whole, and ProjectionSnapshotQuery.ts must keep serving the stored repository_identity_json column instead of resolving an identity on the read path; take upstream for the rest of ProjectionSnapshotQuery.ts, then re-apply the stored-column reads on top. In RepositoryIdentityResolver.ts the GitWorkDepth permit around each git spawn, the GitWorkDepth requirement in the return types and the GitWorkDepth.layer provide survive; the rest takes upstream. An upstream test that seeds projection_projects with raw SQL and expects a read to resolve an identity is edited to fit: it seeds repository_identity_json and repository_identity_workspace_root, and where it asserted the resolver ran on a read it asserts the resolver did not. ProjectionSnapshotQuery.test.ts (the two sweep tests) and ThreadPullRequestReactor.test.ts (the unsettled read test) carry that edit, with a preferSchemaOverJson exemption on the fixture line. In ws.ts the project.repository-identity-recorded case of the shell stream survives; the rest of ws.ts takes upstream.",
       "files": [
         "apps/server/src/orchestration/Layers/RepositoryIdentityReactor.ts",
         "apps/server/src/orchestration/Services/RepositoryIdentityReactor.ts",
         "apps/server/src/persistence/ForkMigrations/003_ProjectionProjectRepositoryIdentity.ts",
         "apps/server/src/vcs/GitWorkDepth.ts",
-        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts"
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts",
+        "apps/server/src/project/RepositoryIdentityResolver.ts",
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts",
+        "apps/server/src/orchestration/ThreadPullRequestReactor.test.ts",
+        "apps/server/src/ws.ts"
       ],
       "test": "apps/server/src/orchestration/Layers/ShellSnapshotSpawn.test.ts",
       "patchesUpstream": true
@@ -93,27 +106,33 @@
     {
       "name": "fm-acp-provider",
       "description": "First Mate is driven through its ACP door as a configurable ACP agent provider. Issues #78 and #79.",
-      "keep": "Every listed file is the fork's own and upstream has no file at these paths, so keep our side of anything that conflicts here; nothing in these files takes upstream. If upstream adds a file at one of these paths, keep our file and rename upstream's.",
+      "keep": "The five acpAgent files are the fork's own and upstream has no file at these paths, so keep our side of anything that conflicts there; if upstream adds a file at one of these paths, keep our file and rename upstream's. In the mobile ProviderIcon.tsx the iconKey prop, the resolveProviderIconKey call and the switch on the icon key survive, and a mark upstream redraws goes into the matching case; ThreadComposer.tsx keeps passing iconKey={currentModelOption?.providerIconKey} to ProviderIcon. In ProviderInstanceRegistryLive.test.ts the ACP agent slice and its helpers survive. In providerCompatibility.test.ts the line that skips acpAgent survives: a configurable ACP agent is any binary the user names, so the bundled manifest has no version policy for it. Everything else in those four files takes upstream.",
       "files": [
         "apps/server/src/provider/acpAgent/AcpAgentProvider.ts",
         "apps/server/src/provider/acpAgent/AcpAgentDriver.ts",
         "apps/server/src/provider/acpAgent/AcpAgentAdapter.ts",
         "apps/server/src/provider/acpAgent/AcpAgentIdentity.ts",
-        "apps/server/src/provider/acpAgent/AcpAgentSupport.ts"
+        "apps/server/src/provider/acpAgent/AcpAgentSupport.ts",
+        "apps/mobile/src/components/ProviderIcon.tsx",
+        "apps/mobile/src/features/threads/ThreadComposer.tsx",
+        "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts",
+        "apps/server/src/provider/providerCompatibility.test.ts"
       ],
       "test": "apps/server/src/provider/acpAgent/AcpAgentProvider.test.ts",
-      "patchesUpstream": false
+      "patchesUpstream": true
     },
     {
       "name": "fm-worker-threads",
       "description": "First Mate workers show up as read-only threads, with the fork's own migration track behind them. Issue #81.",
-      "keep": "AcpAgentWorkerThreadReactor.ts, AcpAgentWorkerSessions.ts, AcpPeerSessions.ts and ForkMigrations.ts are ours whole, and decider.ts must keep our read-only thread handling; take upstream for the rest of decider.ts, then re-apply the read-only rules on top.",
+      "keep": "AcpAgentWorkerThreadReactor.ts, AcpAgentWorkerSessions.ts, AcpPeerSessions.ts and ForkMigrations.ts are ours whole, and decider.ts must keep our read-only thread handling; take upstream for the rest of decider.ts, then re-apply the read-only rules on top. In Sqlite.ts the retireLegacyOrderingMigrationRow() call before upstream's migrator and the runForkMigrations() call after it survive; the rest of Sqlite.ts takes upstream. In AcpSessionRuntime.ts the offer sink survives: each peer route hands its events to its own thread through offer and rootEventSink, where upstream writes to one queue. A change upstream makes to the event handling there is re-applied on that sink, and state upstream keeps per session, such as the set of shown tool calls, is kept per route.",
       "files": [
         "apps/server/src/provider/acpAgent/AcpAgentWorkerThreadReactor.ts",
         "apps/server/src/provider/acpAgent/AcpAgentWorkerSessions.ts",
         "apps/server/src/provider/acp/AcpPeerSessions.ts",
         "apps/server/src/persistence/ForkMigrations.ts",
-        "apps/server/src/orchestration/decider.ts"
+        "apps/server/src/orchestration/decider.ts",
+        "apps/server/src/persistence/Layers/Sqlite.ts",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts"
       ],
       "test": "apps/server/src/orchestration/decider.readOnly.test.ts",
       "patchesUpstream": true
@@ -134,7 +153,7 @@
     {
       "name": "fork-connect-renderer-origin",
       "description": "T3 Connect sign-in works in the fork. T3's production Clerk instance accepts t3code://app and rejects t3code-fork://app with origin_invalid, so the renderer is served from upstream's t3code scheme while the Clerk bridge, the installer and the Linux desktop entry keep the fork's t3code-fork link scheme. On first launch ForkRendererStorageMigration.ts copies localStorage (drafts, prompt stash, themes, sidebar and second mate folds) from the old t3code-fork://app origin to t3code://app. The Clerk bridge registers its link scheme as privileged on its own, and Electron keeps the secure, fetch and CORS schemes of the last call only, so DesktopClerk.ts lists every scheme again right after creating the bridge. Without that t3code://app is not a secure context, crypto.subtle is undefined and every T3 Connect relay call fails. ForkRendererStorageMigration.ts is the fork's own module and upstream has no file at that path, so its test cannot pass on plain upstream.",
-      "keep": "ForkRendererStorageMigration.ts is ours whole. getDesktopLinkScheme, the link schemes in the privileged scheme list and the comments on them survive in ElectronProtocol.ts; DesktopClerk.ts, DesktopLinuxUrlHandler.ts and DesktopPreReadyPlatform.ts pass getDesktopLinkScheme where upstream passes getDesktopScheme; registerDesktopSchemePrivilegesSync stays exported from ElectronProtocol.ts and DesktopClerk.ts calls it right after createClerkBridge; the migration call before registerDesktopProtocol survives in DesktopApp.ts; the Google and GitHub sign-in note survives in the doc; everything else in those files takes upstream.",
+      "keep": "ForkRendererStorageMigration.ts is ours whole. getDesktopLinkScheme, the link schemes in the privileged scheme list and the comments on them survive in ElectronProtocol.ts; DesktopClerk.ts, DesktopLinuxUrlHandler.ts and DesktopPreReadyPlatform.ts pass getDesktopLinkScheme where upstream passes getDesktopScheme; registerDesktopSchemePrivilegesSync stays exported from ElectronProtocol.ts and DesktopClerk.ts calls it right after createClerkBridge; the migration call before registerDesktopProtocol survives in DesktopApp.ts; the Google and GitHub sign-in note survives in the doc; everything else in those files takes upstream. In DesktopClerk.test.ts the electron mock that stubs protocol.registerSchemesAsPrivileged and the t3code-fork user data and renderer scheme names survive; the rest of that test takes upstream.",
       "files": [
         "apps/desktop/src/app/ForkRendererStorageMigration.ts",
         "apps/desktop/src/electron/ElectronProtocol.ts",
@@ -142,7 +161,8 @@
         "apps/desktop/src/app/DesktopLinuxUrlHandler.ts",
         "apps/desktop/src/app/DesktopPreReadyPlatform.ts",
         "apps/desktop/src/app/DesktopApp.ts",
-        "docs/operations/fork-windows-build.md"
+        "docs/operations/fork-windows-build.md",
+        "apps/desktop/src/app/DesktopClerk.test.ts"
       ],
       "test": [
         "apps/desktop/src/app/ForkRendererStorageMigration.test.ts",
@@ -154,20 +174,25 @@
     {
       "name": "fm-worker-thread-model",
       "description": "A read-only worker thread says which model and thinking level is behind it: a strip where the composer would sit, and badges on a full sidebar row; a compact row leaves them to the hover card so its title keeps room. ReadOnlyThreadModel.tsx and readOnlyThreadModel.logic.ts are the fork's own modules and upstream has no file at either path, so the test cannot pass on plain upstream. Issue #135.",
-      "keep": "ReadOnlyThreadModel.tsx and readOnlyThreadModel.logic.ts are ours whole, and the model and thinking level strip and sidebar badges they add survive in ChatView.tsx and Sidebar.tsx; everything else in those files takes upstream.",
+      "keep": "ReadOnlyThreadModel.tsx and readOnlyThreadModel.logic.ts are ours whole, and the model and thinking level strip and sidebar badges they add survive in ChatView.tsx and Sidebar.tsx; everything else in those files takes upstream. readOnlyThread.logic.ts and its test are ours whole, and in CommandPalette.tsx the offersSessionRestart(activeThread) condition on the Restart agent session action survives, so the action is not offered on a read-only thread; the rest of CommandPalette.tsx takes upstream.",
       "files": [
         "apps/web/src/components/chat/ReadOnlyThreadModel.tsx",
         "apps/web/src/components/chat/readOnlyThreadModel.logic.ts",
         "apps/web/src/components/ChatView.tsx",
-        "apps/web/src/components/Sidebar.tsx"
+        "apps/web/src/components/Sidebar.tsx",
+        "apps/web/src/components/readOnlyThread.logic.ts",
+        "apps/web/src/components/CommandPalette.tsx"
       ],
-      "test": "apps/web/src/components/chat/readOnlyThreadModel.test.tsx",
+      "test": [
+        "apps/web/src/components/chat/readOnlyThreadModel.test.tsx",
+        "apps/web/src/components/readOnlyThread.logic.test.ts"
+      ],
       "patchesUpstream": true
     },
     {
       "name": "fm-fleet-thread-roles",
       "description": "Fleet threads carry a role. The First Mate thread never auto-settles and, pinned, has its own sidebar slot; fm-fleet-sidebar-tree arranges second mates and workers.",
-      "keep": "fleetThreads.ts, useStartFirstMateThread.ts and fork migration 8 are ours whole, and the fleetRole and fleetRepo fields, the First Mate sidebar slot, the settlement exception and the single First Mate invariant survive in the files listed; everything else in those files follows upstream.",
+      "keep": "fleetThreads.ts, useStartFirstMateThread.ts and fork migration 8 are ours whole, and the fleetRole and fleetRepo fields, the First Mate sidebar slot, the settlement exception and the single First Mate invariant survive in the files listed; everything else in those files follows upstream. The thread menus offer the auto-settle switch through offersAutoSettleSwitch from fleetThreads.ts, so First Mate, which the server never auto-settles, shows none: the call survives where Sidebar.tsx and useThreadActionMenu.ts set autoSettleOptOut and where the mobile thread-list-v2-items.tsx builds its auto-settle menu.",
       "files": [
         "packages/contracts/src/orchestration.ts",
         "packages/client-runtime/src/fleetThreads.ts",
@@ -175,15 +200,20 @@
         "apps/server/src/orchestration/ThreadSettlementPolicy.ts",
         "apps/server/src/persistence/ForkMigrations/008_ProjectionThreadsFleetRole.ts",
         "apps/web/src/components/Sidebar.tsx",
-        "apps/web/src/hooks/useStartFirstMateThread.ts"
+        "apps/web/src/hooks/useStartFirstMateThread.ts",
+        "apps/web/src/hooks/useThreadActionMenu.ts",
+        "apps/mobile/src/features/threads/thread-list-v2-items.tsx"
       ],
-      "test": "apps/server/src/orchestration/decider.fleetRole.test.ts",
+      "test": [
+        "apps/server/src/orchestration/decider.fleetRole.test.ts",
+        "packages/client-runtime/src/fleetThreads.test.ts"
+      ],
       "patchesUpstream": true
     },
     {
       "name": "fm-fleet-sidebar-tree",
       "description": "The sidebar shows First Mate's fleet as a tree above the other threads. First Mate always holds the top, above a divider: the pinned First Mate, or else the newest live one, with any others under it; with none live, a Start First Mate row stands there instead. Second mates follow in repository-name order and never move with activity; each worker is indented under the second mate that shares its fleetRepo, and a second mate can fold its workers away; the fold is saved with the other sidebar settings, like a project fold, so it survives Settings, project edits and a restart. A settled or snoozed worker leaves the tree and lists in the Settled or Snoozed section with the other threads, and un-settling or waking it puts it back under its second mate. A settled second mate leaves the tree for Settled with all its workers, each listed by its own state, and un-settling it brings it and its live workers back. A snoozed second mate stays a full row in the tree, dimmed, with its wake control, and a pinned second mate keeps its unpin. One rule, resolveParkedState, decides parking for both the tree and the sections, and a drag out of Settled or Snoozed lands a worker straight in the tree. A compact row in Settled or Snoozed always shows its title and the whole role word, and leaves the model and thinking level to the hover card. Fleet rows name their role on the model line in their own colour, then the model and reasoning level, with a ship, sailboat or pickaxe beside the project icon. A second mate's colour, and its workers' quieter one, comes from its project icon as the sidebar shows it: a badge's own colour, or an image logo's main colour read once from the image, with only its lightness set for each theme. Only an icon with no usable colour falls back to a stable colour from the repository name. First Mate keeps its pink.",
-      "keep": "fleetSidebar.logic.ts, fleetTone.logic.ts, FleetTone.tsx, their tests, Sidebar.fleetTree.test.tsx, FirstMateIcon.tsx and FleetRoleIcon.tsx are ours whole. In Sidebar.tsx the fleet tree rows built by useFleetTreeRows, the parkedStateOf helper that calls resolveParkedState and feeds both buildFleetTree and the section loop through sidebarSectionFor, the fleetTreeThreadKeys hold on a drag that lands in the tree, the compact row that keeps the whole role word and drops the model badges, the FleetRowPlacement prop and onPin on SidebarThreadRow, the role line, the fold arrow, the First Mate slot with its Start First Mate row and divider survive; partitionFirstMateThreads survives in Sidebar.logic.ts and its tests in Sidebar.logic.test.ts; the First Mate threads section of docs/user/thread-sidebar.md is ours; in uiStateStore.ts the fleetRepoExpandedById field, its load and save lines, setFleetRepoExpanded and resetUiStateForTests survive, and in uiStateStore.test.ts the fleetRepoExpandedById lines and the folded second mates test survive. Everything else in those files takes upstream.",
+      "keep": "fleetSidebar.logic.ts, fleetTone.logic.ts, FleetTone.tsx, their tests, Sidebar.fleetTree.test.tsx, FirstMateIcon.tsx and FleetRoleIcon.tsx are ours whole. In Sidebar.tsx the fleet tree rows built by useFleetTreeRows, the parkedStateOf helper that calls resolveParkedState and feeds both buildFleetTree and the section loop through sidebarSectionFor, the fleetTreeThreadKeys hold on a drag that lands in the tree, the compact row that keeps the whole role word and drops the model badges, the FleetRowPlacement prop and onPin on SidebarThreadRow, the role line, the fold arrow, the First Mate slot with its Start First Mate row and divider survive; partitionFirstMateThreads survives in Sidebar.logic.ts and its tests in Sidebar.logic.test.ts; the First Mate threads section of docs/user/thread-sidebar.md is ours; in uiStateStore.ts the fleetRepoExpandedById field, its load and save lines, setFleetRepoExpanded and resetUiStateForTests survive, and in uiStateStore.test.ts the fleetRepoExpandedById lines and the folded second mates test survive. Everything else in those files takes upstream. In Sidebar.tsx the inbox helper of the section loop picks its list through inboxListFor from fleetSidebar.logic.ts, so a fleet thread never folds into upstream's Working section; the Working section tests in fleetSidebar.logic.test.ts cover it.",
       "files": [
         "apps/web/src/components/sidebar/fleetSidebar.logic.ts",
         "apps/web/src/components/sidebar/fleetTone.logic.ts",
@@ -207,7 +237,7 @@
     {
       "name": "fm-fleet-thread-read-only-clear",
       "description": "The fleet can clear read-only on a second mate's thread with thread.read-only.clear, so the user can type into it. Only the fleet issuer may send it, and only on a fleet-owned, unarchived thread whose fleetRole is second-mate. It records a thread.read-only-cleared event that sets readOnly to false on the thread and its shell row, so it survives a restart and clients update. Nothing makes a thread read-only again. The server advertises fleetThreadReadOnlyClear in its environment capabilities.",
-      "keep": "fleetThreadReadOnlyClear.test.ts is ours whole. The thread.read-only-cleared case survives in threadReducer.test.ts, and the fleetThreadReadOnlyClear assertion survives in ServerEnvironment.test.ts. The thread.read-only.clear command, the thread.read-only-cleared event and payload, and the OrchestrationThread.readOnly comment survive in orchestration.ts; the fleetThreadReadOnlyClear capability survives in environment.ts and ServerEnvironment.ts; readOnlyClearRefusal survives in fleetThreads.ts; the issuer stamp for the command survives in Normalizer.ts; the command case survives in decider.ts; the event case survives in projector.ts, ProjectionPipeline.ts and threadReducer.ts; and the payload re-export survives in Schemas.ts. Everything else in those files takes upstream.",
+      "keep": "fleetThreadReadOnlyClear.test.ts is ours whole. The thread.read-only-cleared case survives in threadReducer.test.ts, and the fleetThreadReadOnlyClear assertion survives in ServerEnvironment.test.ts. The thread.read-only.clear command, the thread.read-only-cleared event and payload, and the OrchestrationThread.readOnly comment survive in orchestration.ts; the fleetThreadReadOnlyClear capability survives in environment.ts and ServerEnvironment.ts; readOnlyClearRefusal survives in fleetThreads.ts; the issuer stamp for the command survives in Normalizer.ts; the command case survives in decider.ts; the event case survives in projector.ts, ProjectionPipeline.ts and threadReducer.ts; and the payload re-export survives in Schemas.ts. Everything else in those files takes upstream. normalizeDispatchCommand takes an issuer, so every call in ws.ts passes one: a call upstream adds for a command the server writes on a client's behalf passes \"client\".",
       "files": [
         "packages/contracts/src/orchestration.ts",
         "packages/contracts/src/environment.ts",
@@ -218,7 +248,8 @@
         "apps/server/src/orchestration/decider.ts",
         "apps/server/src/orchestration/projector.ts",
         "apps/server/src/orchestration/Schemas.ts",
-        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts"
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts",
+        "apps/server/src/ws.ts"
       ],
       "test": [
         "apps/server/src/orchestration/fleetThreadReadOnlyClear.test.ts",
@@ -276,7 +307,7 @@
     {
       "name": "fm-turn-start-when-busy-environment",
       "description": "A deferred turn start (whenBusy: \"queue\") can carry an environment. The engine keeps it in memory, never on an event or in the deferred-turn-start table, and hands it to the provider reactor when the deferred turn start runs, so the session spawned or restarted for it gets it, as for a direct start. The deferred turn start records only hasEnvironment. After a restart the environment is gone, so the decider drops it with the environment-lost reason instead of running it without it. The decider asks the engine through DeciderContext, a signed-off exception to pure orchestration. The server advertises turnStartWhenBusyEnvironment in its environment capabilities.",
-      "keep": "TurnEnvironment.ts, DeciderContext.ts and deferredTurnStarts.ts are ours whole, including makeDeferredTurnEnvironments and the environment-lost drop in releaseDeferredTurnStart. The hasEnvironment field and the environment-lost drop reason survive in orchestration.ts; the turnStartWhenBusyEnvironment capability survives in environment.ts and ServerEnvironment.ts; and the deferredTurnEnvironments instance, the DeciderContext it provides around decideOrchestrationCommand and its remember call after the commit survive in OrchestrationEngine.ts. Everything else in those files takes upstream.",
+      "keep": "TurnEnvironment.ts, DeciderContext.ts and deferredTurnStarts.ts are ours whole, including makeDeferredTurnEnvironments and the environment-lost drop in releaseDeferredTurnStart. The hasEnvironment field and the environment-lost drop reason survive in orchestration.ts; the turnStartWhenBusyEnvironment capability survives in environment.ts and ServerEnvironment.ts; and the deferredTurnEnvironments instance, the DeciderContext it provides around decideOrchestrationCommand and its remember call after the commit survive in OrchestrationEngine.ts. Everything else in those files takes upstream. In ProviderCommandReactor.ts the environment option of the session start options, withTurnEnvironment, and the threadSpawnEnvironments map that decides a restart on a changed environment survive beside any option upstream adds, such as titleSeed; the rest of that file takes upstream apart from what claude-option-change-keeps-background-work names.",
       "files": [
         "packages/contracts/src/orchestration.ts",
         "packages/contracts/src/environment.ts",
@@ -284,7 +315,8 @@
         "apps/server/src/orchestration/TurnEnvironment.ts",
         "apps/server/src/orchestration/DeciderContext.ts",
         "apps/server/src/orchestration/deferredTurnStarts.ts",
-        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts"
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.ts",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts"
       ],
       "test": "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts",
       "testName": "defers a turn start that carries an environment and starts it when free|after a restart, drops a deferred turn start whose environment died with the process|does not defer a turn start that carries an environment without whenBusy",
@@ -405,7 +437,7 @@
     {
       "name": "fork-app-icon",
       "description": "The fork's app icon: an orange T3 tile with a navy corner badge carrying the badge label from forkBuild.ts. forkAppIcon.ts holds its geometry once; the sidebar header renders it as SVG and scripts/generate-fork-icons.ts rasterises it into every icon file the desktop and web builds ship, so the taskbar icon and the header icon match. forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and assets/fork/ are the fork's own and upstream has none of them, so the tests cannot pass on plain upstream. Issues #59 and #154.",
-      "keep": "forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and every file in assets/fork/ are ours whole. The ./forkAppIcon export survives in packages/shared/package.json, the fork* icon paths and the fork web brand survive in brand-assets.ts, and SidebarChrome.tsx still shows ForkAppIcon in the sidebar header. Everything else in those three files takes upstream. After any merge, run node scripts/generate-fork-icons.ts; the generator test fails if the committed icons drift from it.",
+      "keep": "forkAppIcon.ts, ForkAppIcon.tsx, generate-fork-icons.ts and every file in assets/fork/ are ours whole. The ./forkAppIcon export survives in packages/shared/package.json, the fork* icon paths and the fork web brand survive in brand-assets.ts, and SidebarChrome.tsx still shows ForkAppIcon in the sidebar header. Everything else in those three files takes upstream. After any merge, run node scripts/generate-fork-icons.ts; the generator test fails if the committed icons drift from it. In the mobile CompactBrandTitle.tsx the fork tag pill survives: FORK_TAG_LABEL from resolveForkBuildIdentity, the BrandPill component, the two pills and the accessibility label that names the tag; a styling change upstream makes to its single pill goes inside BrandPill, and the rest of the file takes upstream.",
       "files": [
         "packages/shared/src/forkAppIcon.ts",
         "packages/shared/src/forkBuild.ts",
@@ -420,7 +452,8 @@
         "assets/fork/fork-web-favicon.ico",
         "assets/fork/fork-web-favicon-16x16.png",
         "assets/fork/fork-web-favicon-32x32.png",
-        "assets/fork/fork-web-apple-touch-180.png"
+        "assets/fork/fork-web-apple-touch-180.png",
+        "apps/mobile/src/components/CompactBrandTitle.tsx"
       ],
       "test": ["packages/shared/src/forkAppIcon.test.ts", "scripts/generate-fork-icons.test.ts"],
       "patchesUpstream": true
@@ -478,8 +511,8 @@
     },
     {
       "name": "claude-turn-ends-on-its-own-result",
-      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. A requested turn now ends only on a result that echoes the uuid of a message sent into it: its prompt or any steer. Every steer is sent with its own uuid.",
-      "keep": "In ClaudeAdapter.ts these survive: resultAnswersTurn and its early return in handleResultMessage, the sentMessageUuids field of ClaudeTurnState, and the uuid sendTurn gives every message it queues. In ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
+      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. A requested turn now ends only on a result that echoes the uuid of a message sent into it: its prompt or any steer. Every steer is sent with its own uuid. Upstream fixed the prompt half of this in v0.0.45; the steer uuids are what the fork still adds.",
+      "keep": "Upstream's isResultForOtherTurn (v0.0.45) now decides whether a result ends the turn, in place of the fork's resultAnswersTurn. In ClaudeAdapter.ts these survive: the sentMessageUuids field of ClaudeTurnState, the line in isResultForOtherTurn that matches a result against every uuid in it instead of the turn id alone, and the uuid sendTurn gives every message it queues. In ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
       "files": [
         "apps/server/src/provider/Layers/ClaudeAdapter.ts",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts"
@@ -550,7 +583,7 @@
     {
       "name": "session-process-job",
       "description": "On Windows, every process a provider session starts, at any depth, ends when the session stops or the server exits. Each session's provider process gets its own job object with kill-on-close and no breakaway, and processes it started before joining the job are moved in right after. If the job binding does not work, the server logs an error and reports a processes.session-jobs-unavailable config issue that Settings > Diagnostics shows as a warning on web and desktop, and packaged builds are checked for it.",
-      "keep": "sessionProcessJob.ts and its test fixture are ours whole; take upstream for the rest of the other listed files, then re-apply on top: the installSessionProcessJobs() call in bin.ts, the ...sessionProcessJobEnv spread in each session spawn's environment, the ffi-rs dependency in apps/server/package.json, ffi-rs in the server external roots expected by cli-external-packages.test.ts, the sessionProcessJobsReportLayer in server.ts, sessionProcessJobsIssues() in both issue lists in ws.ts, the processes.session-jobs-unavailable issue kind in packages/contracts/src/server.ts, the session jobs warning at the top of DiagnosticsSettings.tsx, the ffi-rs native-load probe in build-desktop-artifact.ts, and the session process jobs check in smoke-cli-archive.ts.",
+      "keep": "sessionProcessJob.ts and its test fixture are ours whole; take upstream for the rest of the other listed files, then re-apply on top: the installSessionProcessJobs() call in bin.ts, the ...sessionProcessJobEnv spread in each session spawn's environment, the ffi-rs dependency in apps/server/package.json, ffi-rs in the server external roots expected by cli-external-packages.test.ts, the sessionProcessJobsReportLayer in server.ts, sessionProcessJobsIssues() in both issue lists in ws.ts, the processes.session-jobs-unavailable issue kind in packages/contracts/src/server.ts, the session jobs warning at the top of DiagnosticsSettings.tsx, the ffi-rs native-load probe in build-desktop-artifact.ts, and the session process jobs check in smoke-cli-archive.ts. pnpm-lock.yaml takes upstream whole and is then regenerated with pnpm install, never edited by hand, so the ffi-rs importer comes back.",
       "files": [
         "apps/server/src/process/sessionProcessJob.ts",
         "apps/server/src/provider/testFixtures/sessionProcessTree.mjs",
@@ -566,7 +599,8 @@
         "apps/web/src/components/settings/DiagnosticsSettings.tsx",
         "scripts/build-desktop-artifact.ts",
         "scripts/smoke-cli-archive.ts",
-        "scripts/lib/cli-external-packages.test.ts"
+        "scripts/lib/cli-external-packages.test.ts",
+        "pnpm-lock.yaml"
       ],
       "test": "apps/server/src/process/sessionProcessJob.test.ts",
       "patchesUpstream": true
@@ -605,6 +639,93 @@
         "docs/user/remote-access.md"
       ],
       "test": "apps/web/src/cloud/forkUnlinkThisPc.test.tsx",
+      "patchesUpstream": true
+    },
+    {
+      "name": "fork-ci-github-runners",
+      "description": "CI runs on GitHub-hosted runners, not upstream's Blacksmith runners, which this fork has no account for (#32), and the test job also runs the fork feature check (#94). GitHub's runners are slower: upstream's generated shell snapshot test in packages/client-runtime/src/platform/persistence.test.ts takes about nine seconds there against a five second default, measured on pull request 179. The fork's extra thread fields are not the cause; generation is as fast with them as without. fork-ci-workflows.test.ts fails on plain upstream, whose ci.yml names Blacksmith runners.",
+      "keep": "In ci.yml and mobile-fingerprint-check.yml every runs-on names ubuntu-latest or macos-latest in place of a blacksmith runner, and the Check fork features step survives after Test in ci.yml's test job; everything else in those workflows takes upstream, job layout included. persistence.test.ts keeps its thirty second limit on the generated snapshot test; the rest of that test takes upstream. fork-ci-workflows.test.ts is ours whole.",
+      "files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/mobile-fingerprint-check.yml",
+        "packages/client-runtime/src/platform/persistence.test.ts",
+        "scripts/fork-ci-workflows.test.ts"
+      ],
+      "test": "scripts/fork-ci-workflows.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "provider-probe-only-enabled",
+      "description": "The server probes only the provider instances the user enabled, so a disabled provider never spawns its CLI. Each driver hands makeManagedServerProvider an isEnabled answer. ProviderStatusProbe.test.ts is the fork's own test and upstream has no file at that path.",
+      "keep": "ProviderStatusProbe.test.ts is ours whole; when upstream changes a service the probe stack needs, add the mock layer rather than dropping a case. The isEnabled option of makeManagedServerProvider.ts survives, and every driver that builds a managed provider passes it: ClaudeDriver.ts, CodexDriver.ts, CursorDriver.ts, GrokDriver.ts, OpenCodeDriver.ts, and upstream's CodexManagedProvider.ts, which gained isEnabled: () => enabled in the v0.0.45 merge. A driver upstream adds gets the same line. Everything else in those files takes upstream.",
+      "files": [
+        "apps/server/src/provider/Layers/ProviderStatusProbe.test.ts",
+        "apps/server/src/provider/makeManagedServerProvider.ts",
+        "apps/server/src/provider/Drivers/ClaudeDriver.ts",
+        "apps/server/src/provider/Drivers/CodexDriver.ts",
+        "apps/server/src/provider/Drivers/CodexManagedProvider.ts",
+        "apps/server/src/provider/Drivers/CursorDriver.ts",
+        "apps/server/src/provider/Drivers/GrokDriver.ts",
+        "apps/server/src/provider/Drivers/OpenCodeDriver.ts"
+      ],
+      "test": "apps/server/src/provider/Layers/ProviderStatusProbe.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "client-trace-exporter-shared",
+      "description": "Web and mobile share one client trace exporter, installClientTracing and ClientTracingLive in packages/client-runtime/src/observability/clientTracing.ts, in place of a copy per surface. That module and its test are the fork's own.",
+      "keep": "packages/client-runtime/src/observability/clientTracing.ts and its test are ours whole. apps/web/src/observability/clientTracing.ts stays a thin caller of installClientTracing: take upstream's values, such as the service name and resource attributes, into that call, and do not bring back upstream's own exporter code in that file. In server.test.ts the web and mobile client tracing resources and the resource parameter of makeBrowserOtlpPayload survive, with the tests that send one payload per surface; the web resource carries upstream's service name.",
+      "files": [
+        "packages/client-runtime/src/observability/clientTracing.ts",
+        "packages/client-runtime/src/observability/clientTracing.test.ts",
+        "apps/web/src/observability/clientTracing.ts",
+        "apps/server/src/server.test.ts"
+      ],
+      "test": "packages/client-runtime/src/observability/clientTracing.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "trace-span-floor",
+      "description": "The local trace file drops successful child spans faster than a floor, one millisecond by default, so sql.execute and its like do not drown a latency diagnosis (#69). shouldRecordTraceSpan and DEFAULT_TRACE_MIN_DURATION_MS in packages/shared/src/observability.ts carry the rule, and upstream has neither.",
+      "keep": "DEFAULT_TRACE_MIN_DURATION_MS, the minDurationMs option, shouldRecordTraceSpan and its use when a span ends survive in observability.ts with their tests in observability.test.ts, and serverLogger.test.ts keeps the DEFAULT_TRACE_MIN_DURATION_MS import and the traceMinDurationMs field its config needs; everything else in those files takes upstream.",
+      "files": [
+        "packages/shared/src/observability.ts",
+        "packages/shared/src/observability.test.ts",
+        "apps/server/src/serverLogger.test.ts"
+      ],
+      "test": "packages/shared/src/observability.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "thread-deletion-and-archive-queries",
+      "description": "Deleting a thread sweeps its checkpoint refs (#24), and a client that asks for an archived thread gets one answer in place of a retry storm (#70). Both read through two query methods the fork added to ProjectionSnapshotQuery: getThreadWorkspaceRoot and getThreadLifecycleById. Every test that mocks the query has to supply them.",
+      "keep": "getThreadWorkspaceRoot and getThreadLifecycleById survive in Services/ProjectionSnapshotQuery.ts, and the checkpoint ref sweep survives in ThreadDeletionReactor.ts with its tests. A test that builds a ProjectionSnapshotQuery mock by hand keeps a line for each of the two methods, in whatever style upstream's mock uses: CheckpointDiffQuery.test.ts and serverRuntimeStartup.test.ts carry them. Everything else in those files takes upstream. OrchestrationEngine.test.ts and server.test.ts build the same mock by hand and keep the same two lines.",
+      "files": [
+        "apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts",
+        "apps/server/src/orchestration/Layers/ThreadDeletionReactor.ts",
+        "apps/server/src/orchestration/Layers/ThreadDeletionReactor.test.ts",
+        "apps/server/src/checkpointing/CheckpointDiffQuery.test.ts",
+        "apps/server/src/serverRuntimeStartup.test.ts",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts",
+        "apps/server/src/server.test.ts"
+      ],
+      "test": "apps/server/src/orchestration/Layers/ThreadDeletionReactor.test.ts",
+      "patchesUpstream": true
+    },
+    {
+      "name": "skill-invocability-in-pickers",
+      "description": "The server reads a skill's invocability frontmatter, and the web and mobile pickers act on it (#104). The fork's cases in ComposerCommandMenu.test.tsx cover the web picker.",
+      "keep": "The fork's invocability cases in ComposerCommandMenu.test.tsx survive beside any test upstream adds, with whatever props upstream's ComposerCommandMenu newly requires, such as listId; everything else in that test takes upstream.",
+      "files": ["apps/web/src/components/chat/ComposerCommandMenu.test.tsx"],
+      "test": "apps/web/src/components/chat/ComposerCommandMenu.test.tsx",
+      "patchesUpstream": true
+    },
+    {
+      "name": "windows-posix-test-skips",
+      "description": "Server suites that drive a POSIX shell stub skip on Windows through a narrow posixOnly alias, so the fork's Windows development machines get a clean run. Linux CI runs them all. The fork has no test that proves the alias, so the entry names one of the suites that uses it.",
+      "keep": "In CodexTextGeneration.test.ts the posixOnly alias survives, and every test that runs the shell stub is declared with it, a test upstream adds included; everything else in that file takes upstream.",
+      "files": ["apps/server/src/textGeneration/CodexTextGeneration.test.ts"],
+      "test": "apps/server/src/textGeneration/CodexTextGeneration.test.ts",
       "patchesUpstream": true
     }
   ]

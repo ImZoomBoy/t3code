@@ -15,6 +15,18 @@ export function isFirstMateThread(thread: FleetThreadFields): boolean {
   return thread.fleetRole === "first-mate";
 }
 
+/**
+ * Whether a thread's menu offers the per-thread auto-settle switch. The server
+ * never auto-settles First Mate, so a switch there would claim a setting that
+ * has no effect.
+ */
+export function offersAutoSettleSwitch(
+  thread: FleetThreadFields,
+  serverSupports: boolean,
+): boolean {
+  return serverSupports && !isFirstMateThread(thread);
+}
+
 /** The role label a fleet thread shows, or null for an ordinary thread. */
 export function fleetRoleLabel(thread: FleetThreadFields): string | null {
   switch (thread.fleetRole) {

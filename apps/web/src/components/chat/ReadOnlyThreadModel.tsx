@@ -45,8 +45,8 @@ export function ReadOnlyThreadModelStrip(props: {
   });
 
   return (
-    <div className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem)]">
-      <div className="mx-auto flex w-full max-w-3xl justify-center pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
+    <div className="w-full ps-(--workspace-gutter-start) pe-(--workspace-gutter-end)">
+      <div className="mx-auto flex w-full max-w-3xl justify-center">
         <div
           data-testid="read-only-thread-model-strip"
           aria-label="Read-only thread"
@@ -60,7 +60,7 @@ export function ReadOnlyThreadModelStrip(props: {
               accentColor={providerEntry.accentColor}
               showBadge={shouldShowInstanceBadge(providerEntry, props.providerEntries)}
               iconClassName="size-3.5 opacity-70"
-              badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+              badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-5xs"
             />
           ) : null}
           <span className="min-w-0 truncate font-medium text-foreground/80">{modelLabel}</span>
@@ -74,6 +74,10 @@ export function ReadOnlyThreadModelStrip(props: {
           <span className="min-w-0 truncate">{runtimeModeLabels[props.runtimeMode]}</span>
         </div>
       </div>
+      <div
+        aria-hidden
+        className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
+      />
     </div>
   );
 }

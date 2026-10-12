@@ -781,7 +781,6 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
 
   const pollTick = Effect.fn("PortDiscovery.pollTick")(
     function* () {
-      if ((yield* Ref.get(stateRef)).retainCount <= 0) return;
       const configuredUrls = [
         ...new Set(
           [...(yield* Ref.get(stateRef)).listeners.values()].flatMap(
@@ -813,9 +812,12 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     ),
   );
 
-  // Single layer-scoped polling fiber. Rounds are no-ops when no client is
-  // currently retained, so the cost is one Ref.get every period.
-  yield* Effect.forkScoped(poll.run(pollTick()));
+  // Single layer-scoped polling fiber. Rounds skip the scan and its span when no
+  // client is currently retained, so the cost is one Ref.get every period.
+  const pollIfRetained = Ref.get(stateRef).pipe(
+    Effect.flatMap((state) => (state.retainCount > 0 ? pollTick() : Effect.void)),
+  );
+  yield* Effect.forkScoped(poll.run(pollIfRetained));
 
   const acquireRetention = Effect.fn("PortDiscovery.retain")(function* () {
     const wasIdle = yield* Ref.modify(stateRef, (state) => [

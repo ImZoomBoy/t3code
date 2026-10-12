@@ -25,6 +25,7 @@ import {
   type ClaudeSettings,
   type CodexSettings,
   type CursorSettings,
+  EnvironmentId,
   type GrokSettings,
   type OpenCodeSettings,
   ProviderDriverKind,
@@ -55,7 +56,10 @@ import * as ModelManifest from "../ModelManifest.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import type { AnyProviderDriver } from "../ProviderDriver.ts";
 import type { ProviderInstanceRegistryShape } from "../Services/ProviderInstanceRegistry.ts";
-import * as CodexResetCredit from "./codexResetCredit.ts";
+import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";
+import { CodexInstallation } from "../CodexInstallation.ts";
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
+import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
 
@@ -189,7 +193,18 @@ const makeTestLayer = (log: ProbeLog) => {
     Layer.provideMerge(makeHttpClientLayer(log)),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
-    Layer.provideMerge(CodexResetCredit.layerTest),
+    Layer.provideMerge(ResetCreditCoordinator.layerTest),
+    Layer.provideMerge(
+      Layer.mock(CodexInstallation)({ managedDirectory: "unused-managed-installation" }),
+    ),
+    Layer.provideMerge(Layer.mock(ServerSecretStore)({})),
+    Layer.provideMerge(
+      Layer.succeed(ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(
+          EnvironmentId.make("00000000-0000-4000-8000-000000000001"),
+        ),
+      }),
+    ),
   );
 };
 
