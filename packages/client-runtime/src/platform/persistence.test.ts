@@ -55,8 +55,9 @@ describe("encodeShellSnapshotForCache", () => {
           yield* encodeSnapshot(snapshot),
         );
       }),
-    // A thousand generated threads is CPU work. The fork's thread shell has more
-    // fields and its CI runners are slower, so the default five seconds is too tight.
+    // A thousand generated threads is CPU work, not a wait. It takes about nine
+    // seconds on the GitHub runners this fork's CI uses, so the default five is
+    // too tight there. See fork-ci-github-runners in fork-features.json.
     30_000,
   );
 });
