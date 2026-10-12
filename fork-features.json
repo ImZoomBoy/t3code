@@ -478,8 +478,8 @@
     },
     {
       "name": "claude-turn-ends-on-its-own-result",
-      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. A requested turn now ends only on a result that echoes the uuid of a message sent into it: its prompt or any steer. Every steer is sent with its own uuid.",
-      "keep": "In ClaudeAdapter.ts these survive: resultAnswersTurn and its early return in handleResultMessage, the sentMessageUuids field of ClaudeTurnState, and the uuid sendTurn gives every message it queues. In ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
+      "description": "On resume after a Claude process died with background tasks running, Claude Code runs a queued orphaned-task notice as its own turn before the prompt. A requested turn now ends only on a result that echoes the uuid of a message sent into it: its prompt or any steer. Every steer is sent with its own uuid. Upstream fixed the prompt half of this in v0.0.45; the steer uuids are what the fork still adds.",
+      "keep": "Upstream's isResultForOtherTurn (v0.0.45) now decides whether a result ends the turn, in place of the fork's resultAnswersTurn. In ClaudeAdapter.ts these survive: the sentMessageUuids field of ClaudeTurnState, the line in isResultForOtherTurn that matches a result against every uuid in it instead of the turn id alone, and the uuid sendTurn gives every message it queues. In ClaudeAdapter.test.ts the test named in testName survives. Everything else in those files takes upstream.",
       "files": [
         "apps/server/src/provider/Layers/ClaudeAdapter.ts",
         "apps/server/src/provider/Layers/ClaudeAdapter.test.ts"
