@@ -173,7 +173,7 @@ import {
   type FleetBranch,
   FLEET_ROLE_WORDS,
   type FleetParked,
-  mayFoldIntoWorking,
+  inboxListFor,
   resolveParkedState,
   sidebarSectionFor,
 } from "./sidebar/fleetSidebar.logic";
@@ -3014,7 +3014,10 @@ export default function Sidebar() {
     // Working beta: only inbox threads fold away. Pins stay where the user
     // put them, and snoozed or settled threads keep their shelves.
     const inbox = (thread: EnvironmentThreadShell) =>
-      workingShelfEnabled && mayFoldIntoWorking(thread) && isSidebarThreadWorking(thread)
+      inboxListFor(thread, {
+        workingSection: workingShelfEnabled,
+        busy: isSidebarThreadWorking(thread),
+      }) === "working"
         ? working
         : active;
     const snoozed: EnvironmentThreadShell[] = [];

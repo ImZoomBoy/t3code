@@ -177,12 +177,16 @@ export function sidebarSectionFor(
 }
 
 /**
- * Whether upstream's Working section may fold a thread away. A fleet thread
- * never folds: its place is the fleet tree, or the inbox while its second
- * mate is settled.
+ * Which inbox list a thread outside the fleet tree goes in: upstream's Working
+ * section or Active. A busy thread folds into Working only while the switch is
+ * on. A fleet thread never folds: its place is the fleet tree, or Active while
+ * its second mate is settled.
  */
-export function mayFoldIntoWorking(thread: { readonly fleetRole?: unknown }): boolean {
-  return thread.fleetRole == null;
+export function inboxListFor(
+  thread: Pick<FleetThread, "fleetRole">,
+  options: { readonly workingSection: boolean; readonly busy: boolean },
+): "working" | "active" {
+  return options.workingSection && options.busy && thread.fleetRole == null ? "working" : "active";
 }
 
 /** One row of the fleet tree, in display order. */
