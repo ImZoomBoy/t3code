@@ -176,6 +176,15 @@ export function sidebarSectionFor(
   return parked ?? (thread.pinnedAt != null ? "pinned" : "active");
 }
 
+/**
+ * Whether upstream's Working section may fold a thread away. A fleet thread
+ * never folds: its place is the fleet tree, or the inbox while its second
+ * mate is settled.
+ */
+export function mayFoldIntoWorking(thread: { readonly fleetRole?: unknown }): boolean {
+  return thread.fleetRole == null;
+}
+
 /** One row of the fleet tree, in display order. */
 export interface FleetRow<T> {
   readonly thread: T;

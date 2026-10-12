@@ -6,6 +6,7 @@ import {
   buildFleetTree,
   planFirstMateSlot,
   resolveParkedState,
+  mayFoldIntoWorking,
   sidebarSectionFor,
 } from "./fleetSidebar.logic";
 
@@ -240,6 +241,19 @@ describe("buildFleetTree", () => {
       ["sm", "snoozed"],
       ["w", null],
     ]);
+  });
+});
+
+describe("mayFoldIntoWorking", () => {
+  it("keeps every fleet thread out of the Working section", () => {
+    expect(mayFoldIntoWorking({ fleetRole: "first-mate" })).toBe(false);
+    expect(mayFoldIntoWorking({ fleetRole: "second-mate" })).toBe(false);
+    expect(mayFoldIntoWorking({ fleetRole: "worker" })).toBe(false);
+  });
+
+  it("lets an ordinary thread fold away", () => {
+    expect(mayFoldIntoWorking({})).toBe(true);
+    expect(mayFoldIntoWorking({ fleetRole: null })).toBe(true);
   });
 });
 
