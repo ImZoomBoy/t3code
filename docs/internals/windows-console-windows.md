@@ -42,9 +42,10 @@ Node exposes no way to ask for only the first. Forcing the flag everywhere would
 the editor windows `externalLauncher.ts` opens, `explorer.exe`, and an `electron-updater` NSIS
 installer - none of which pass any spawn options of their own, so none of which could opt out.
 
-So the hook decides per target. It resolves the executable the way `CreateProcess` would
-(`PATH`, then `PATHEXT`), reads the `Subsystem` field out of the PE optional header, and applies
-`windowsHide` only for `IMAGE_SUBSYSTEM_WINDOWS_CUI`. Anything graphical, or anything it cannot
+So the hook decides per target. It resolves the executable the way `CreateProcess` would, with
+the `PATH` and `PATHEXT` of the child's own environment, since a caller may add a directory only
+the child sees (the device host does, for `adb`). It reads the `Subsystem` field out of the PE
+optional header, and applies `windowsHide` only for `IMAGE_SUBSYSTEM_WINDOWS_CUI`. Anything graphical, or anything it cannot
 parse, is passed through untouched. Results are cached per resolved path.
 
 There is also an explicit opt-out for a console program that genuinely wants a window:

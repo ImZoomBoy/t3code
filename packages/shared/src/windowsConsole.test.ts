@@ -145,6 +145,13 @@ describe("hideWindowsConsoleWindows", () => {
     expect(spawnOptionsFor(consoleExe).windowsHide).toBe(true);
   });
 
+  it("hides a console child found only on the PATH its caller passed", () => {
+    // How `adb` starts: the device host puts the Android SDK on the child's
+    // PATH, which is the one Windows searches, not on this process's.
+    const env = { PATH: fixtures, PATHEXT: NodePath.extname(consoleExe) };
+    expect(spawnOptionsFor("t3-console-fixture", { env }).windowsHide).toBe(true);
+  });
+
   it("leaves a graphical child untouched, so its window still appears", () => {
     // The whole point of reading the header. `windowsHide` is two libuv flags,
     // and the second one hides GUI windows: forcing it here would make an editor
