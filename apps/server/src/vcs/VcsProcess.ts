@@ -131,6 +131,11 @@ export const make = Effect.gen(function* () {
       argumentCount: input.args.length,
     };
 
+    // `gh` 2.92 can start a detached `gh send-telemetry` child. On Windows that
+    // child has no console, so the `tzutil` it runs opens a visible console
+    // window. The server's own `gh` calls opt out of telemetry.
+    const env = input.command === "gh" ? { ...input.env, GH_TELEMETRY: "0" } : input.env;
+
     const result = yield* processRunner
       .run({
         command: input.command,
@@ -139,7 +144,7 @@ export const make = Effect.gen(function* () {
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
         ...(input.onStdoutChunk !== undefined ? { onStdoutChunk: input.onStdoutChunk } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
+        ...(env !== undefined ? { env } : {}),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: input.outputMode ?? "truncate",

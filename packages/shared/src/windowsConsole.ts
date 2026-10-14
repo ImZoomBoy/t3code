@@ -73,10 +73,12 @@ export const allowConsoleWindow: unique symbol = Symbol.for(
  *
  * `file` is the executable as the caller named it, *not* resolved against
  * `PATH`. For `shell: true` Node has already rewritten it to `cmd.exe`.
+ * `envPairs` is the child's environment as `KEY=value` strings.
  */
 interface InternalSpawnOptions {
   readonly file?: string | undefined;
   readonly cwd?: string | undefined;
+  readonly envPairs?: ReadonlyArray<string> | undefined;
   readonly windowsHide?: boolean | undefined;
   readonly [allowConsoleWindow]?: boolean | undefined;
 }
@@ -239,6 +241,26 @@ export const windowsExecutableSubsystem = (
   return subsystem;
 };
 
+/**
+ * The `PATH` and `PATHEXT` of the child's own environment. Windows searches
+ * the child's `PATH`, not the parent's, so a caller that adds a directory -
+ * the Android SDK's `platform-tools` for `adb`, say - must be resolved there.
+ */
+const childSearchEnvironment = (
+  envPairs: ReadonlyArray<string> | undefined,
+): NodeJS.ProcessEnv | undefined => {
+  if (envPairs === undefined) return undefined;
+  const environment: NodeJS.ProcessEnv = {};
+  for (const pair of envPairs) {
+    // Start at 1: Windows keeps per-drive entries such as `=C:=C:\`.
+    const separator = pair.indexOf("=", 1);
+    if (separator === -1) continue;
+    const key = pair.slice(0, separator).toUpperCase();
+    if (key === "PATH" || key === "PATHEXT") environment[key] = pair.slice(separator + 1);
+  }
+  return environment;
+};
+
 /** Test seam: forgets what has been read, so a fixture path can be reused. */
 export const clearWindowsSubsystemCache = (): void => {
   subsystemCache.clear();
@@ -275,7 +297,8 @@ export const hideWindowsConsoleWindows = (
       if (options.windowsHide === true) return inner.call(this, options);
       if (options[allowConsoleWindow] === true) return inner.call(this, options);
       if (typeof options.file !== "string") return inner.call(this, options);
-      if (windowsExecutableSubsystem(options.file, options.cwd) !== "console") {
+      const environment = childSearchEnvironment(options.envPairs);
+      if (windowsExecutableSubsystem(options.file, options.cwd, environment) !== "console") {
         return inner.call(this, options);
       }
       return inner.call(this, { ...options, windowsHide: true });

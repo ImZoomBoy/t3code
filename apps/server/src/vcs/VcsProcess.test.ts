@@ -283,6 +283,49 @@ describe("VcsProcess.run", () => {
     }),
   );
 
+  it.effect("turns off GitHub CLI telemetry for every gh it starts, and only for gh", () =>
+    Effect.gen(function* () {
+      const seen: Array<ProcessRunner.ProcessRunInput> = [];
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: (input) =>
+              Effect.sync(() => {
+                seen.push(input);
+                return {
+                  stdout: "",
+                  stderr: "",
+                  code: ChildProcessSpawner.ExitCode(0),
+                  timedOut: false,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                  stdoutInvalidUtf8: false,
+                  stderrInvalidUtf8: false,
+                };
+              }),
+          }),
+        ),
+        Effect.provide(GitWorkDepth.layerWith(1)),
+      );
+
+      yield* service.run({ ...baseInput, command: "gh", args: ["api", "user"] });
+      yield* service.run({
+        ...baseInput,
+        command: "gh",
+        args: ["api", "user"],
+        env: { GH_DEBUG: "" },
+      });
+      yield* service.run(baseInput);
+
+      expect(seen.map((input) => input.env)).toEqual([
+        { GH_TELEMETRY: "0" },
+        { GH_DEBUG: "", GH_TELEMETRY: "0" },
+        undefined,
+      ]);
+    }),
+  );
+
   it.effect("collects stdout", () =>
     Effect.gen(function* () {
       const result = yield* run({

@@ -21,9 +21,12 @@ NodeFS.appendFileSync(
   `${role === "opencode" ? "provider" : role} ${process.pid}\n`,
 );
 
+// Hidden, because the detached dev server has no console: without it, the
+// watcher it starts would open a console window of its own on Windows.
 const start = (childRole, options = {}) =>
   NodeChildProcess.spawn(process.execPath, [import.meta.filename, childRole], {
     stdio: "ignore",
+    windowsHide: true,
     ...options,
   });
 
