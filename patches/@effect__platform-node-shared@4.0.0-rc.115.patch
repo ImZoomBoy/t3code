@@ -1,0 +1,49 @@
+diff --git a/dist/NodeChildProcessSpawner.js b/dist/NodeChildProcessSpawner.js
+index 95d97c58cd42c5f10c445c289f792df668b1d153..6ca3473cf5e71cfb6fd178203bc424d5ea53e3f3 100644
+--- a/dist/NodeChildProcessSpawner.js
++++ b/dist/NodeChildProcessSpawner.js
+@@ -44,9 +44,16 @@ const isProcessAlive = (childProcess, exitSignal) => {
+     return false;
+   }
+ };
+-const taskkill = (childProcess, onExit = () => {}) => NodeChildProcess.execFile("taskkill", ["/pid", String(childProcess.pid), "/T", "/F"], {
+-  windowsHide: true
+-}, onExit);
++const taskkill = (childProcess, onExit = () => {}) => {
++  // After the leader exits, its PID may be reused by an unrelated process.
++  if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
++    onExit(null);
++    return;
++  }
++  NodeChildProcess.execFile("taskkill", ["/pid", String(childProcess.pid), "/T", "/F"], {
++    windowsHide: true
++  }, onExit);
++};
+ const make = /*#__PURE__*/Effect.gen(function* () {
+   const fs = yield* FileSystem.FileSystem;
+   const path = yield* Path.Path;
+diff --git a/src/NodeChildProcessSpawner.ts b/src/NodeChildProcessSpawner.ts
+index 2077379773283926b715e29d6b6431bf7ba20ff9..bfb5c5f2f81f3733688087b943df3b565bff20b1 100644
+--- a/src/NodeChildProcessSpawner.ts
++++ b/src/NodeChildProcessSpawner.ts
+@@ -95,13 +95,19 @@ const isProcessAlive = (childProcess: NodeChildProcess.ChildProcess, exitSignal:
+ const taskkill = (
+   childProcess: NodeChildProcess.ChildProcess,
+   onExit: (error: NodeChildProcess.ExecException | null) => void = () => {}
+-) =>
++) => {
++  // After the leader exits, its PID may be reused by an unrelated process.
++  if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
++    onExit(null)
++    return
++  }
+   NodeChildProcess.execFile(
+     "taskkill",
+     ["/pid", String(childProcess.pid!), "/T", "/F"],
+     { windowsHide: true },
+     onExit
+   )
++}
+ 
+ const make = Effect.gen(function*() {
+   const fs = yield* FileSystem.FileSystem

@@ -606,6 +606,14 @@
       ],
       "test": "apps/web/src/cloud/forkUnlinkThisPc.test.tsx",
       "patchesUpstream": true
+    },
+    {
+      "name": "effect-taskkill-after-exit",
+      "description": "On Windows, Effect's child process spawner no longer runs taskkill against a pid whose process has already exited. Before, every child that exited non-zero started two taskkill runs on its dead pid, each with its own console host, and the pid could already belong to an unrelated process. The patch backports the guard Effect 4.0.4 ships to 4.0.0-rc.115.",
+      "keep": "The patch file and its patchedDependencies line in pnpm-workspace.yaml are ours whole while the fork is on @effect/platform-node-shared 4.0.0-rc.115; when upstream moves the fork to 4.0.4 or later, which carries the same guard, take upstream and drop both.",
+      "files": ["patches/@effect__platform-node-shared@4.0.0-rc.115.patch", "pnpm-workspace.yaml"],
+      "test": "apps/server/src/process/taskkillAfterExit.test.ts",
+      "patchesUpstream": true
     }
   ]
 }
